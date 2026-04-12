@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="ServisYolcu.API/ServisYolcu.API.csproj" />
+  <Project Path="ServisYolcu.Core/ServisYolcu.Core.csproj" />
+  <Project Path="ServisYolcu.Infrastructure/ServisYolcu.Infrastructure.csproj" />
+</Solution>
