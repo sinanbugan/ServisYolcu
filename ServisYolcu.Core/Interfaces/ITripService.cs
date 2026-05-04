@@ -4,7 +4,7 @@ namespace ServisYolcu.Core.Interfaces;
 
 public interface ITripService
 {
-    Task<IEnumerable<TripDto>> GetAvailableTripsAsync();
+    Task<IEnumerable<TripDto>> GetAvailableTripsAsync(int companyId);
     Task<TripDto?> GetTripByIdAsync(int id);
     Task<TripDetailDto?> GetTripDetailAsync(int id);
     Task<TripDto> CreateTripAsync(int driverId, CreateTripDto dto);

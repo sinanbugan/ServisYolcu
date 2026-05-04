@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ServisYolcu.Core.DTOs.Route;
@@ -17,9 +18,11 @@ public class RoutesController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize]
     public async Task<ActionResult<IEnumerable<RouteDto>>> GetAll()
     {
-        var routes = await _routeService.GetAllRoutesAsync();
+        var companyId = int.Parse(User.FindFirstValue("CompanyId")!);
+        var routes = await _routeService.GetAllRoutesAsync(companyId);
         return Ok(routes);
     }
 
@@ -35,7 +38,8 @@ public class RoutesController : ControllerBase
     [Authorize(Roles = "Admin")]
     public async Task<ActionResult<RouteDto>> Create([FromBody] CreateRouteDto dto)
     {
-        var route = await _routeService.CreateRouteAsync(dto);
+        var companyId = int.Parse(User.FindFirstValue("CompanyId")!);
+        var route = await _routeService.CreateRouteAsync(companyId, dto);
         return CreatedAtAction(nameof(GetById), new { id = route.Id }, route);
     }
 

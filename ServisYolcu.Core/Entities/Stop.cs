@@ -13,4 +13,7 @@ public class Stop
 
     public int RouteId { get; set; }
     public Route Route { get; set; } = null!;
+
+    public int CompanyId { get; set; }
+    public Company Company { get; set; } = null!;
 }

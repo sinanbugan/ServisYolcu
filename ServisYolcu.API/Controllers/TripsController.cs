@@ -18,9 +18,11 @@ public class TripsController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize]
     public async Task<ActionResult<IEnumerable<TripDto>>> GetAvailable()
     {
-        var trips = await _tripService.GetAvailableTripsAsync();
+        var companyId = int.Parse(User.FindFirstValue("CompanyId")!);
+        var trips = await _tripService.GetAvailableTripsAsync(companyId);
         return Ok(trips);
     }
 

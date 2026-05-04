@@ -15,10 +15,10 @@ public class RouteService : IRouteService
         _context = context;
     }
 
-    public async Task<IEnumerable<RouteDto>> GetAllRoutesAsync()
+    public async Task<IEnumerable<RouteDto>> GetAllRoutesAsync(int companyId)
     {
         var routes = await _context.Routes
-            .Where(r => r.IsActive)
+            .Where(r => r.IsActive && r.CompanyId == companyId)
             .Include(r => r.Stops.Where(s => s.IsActive).OrderBy(s => s.Order))
             .ToListAsync();
 
@@ -34,7 +34,7 @@ public class RouteService : IRouteService
         return route is null ? null : MapToDto(route);
     }
 
-    public async Task<RouteDto> CreateRouteAsync(CreateRouteDto dto)
+    public async Task<RouteDto> CreateRouteAsync(int companyId, CreateRouteDto dto)
     {
         var route = new Route
         {
@@ -42,13 +42,15 @@ public class RouteService : IRouteService
             StartPoint = dto.StartPoint,
             EndPoint = dto.EndPoint,
             PricePerSeat = dto.PricePerSeat,
+            CompanyId = companyId,
             Stops = dto.Stops.Select(s => new Stop
             {
                 Name = s.Name,
                 Address = s.Address,
                 Latitude = s.Latitude,
                 Longitude = s.Longitude,
-                Order = s.Order
+                Order = s.Order,
+                CompanyId = companyId
             }).ToList()
         };
 
@@ -59,9 +61,8 @@ public class RouteService : IRouteService
 
     public async Task<StopDto> AddStopAsync(int routeId, UpsertStopDto dto)
     {
-        var routeExists = await _context.Routes.AnyAsync(r => r.Id == routeId && r.IsActive);
-        if (!routeExists)
-            throw new KeyNotFoundException($"Rota bulunamadı: {routeId}");
+        var route = await _context.Routes.FindAsync(routeId)
+            ?? throw new KeyNotFoundException($"Rota bulunamadı: {routeId}");
 
         var stop = new Stop
         {
@@ -70,7 +71,8 @@ public class RouteService : IRouteService
             Address = dto.Address,
             Latitude = dto.Latitude,
             Longitude = dto.Longitude,
-            Order = dto.Order
+            Order = dto.Order,
+            CompanyId = route.CompanyId
         };
 
         _context.Stops.Add(stop);

@@ -34,6 +34,7 @@ public class TokenService : ITokenService
             new Claim(ClaimTypes.GivenName, user.FirstName),
             new Claim(ClaimTypes.Surname, user.LastName),
             new Claim(ClaimTypes.Role, user.Role.ToString()),
+            new Claim("CompanyId", user.CompanyId.ToString()),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 

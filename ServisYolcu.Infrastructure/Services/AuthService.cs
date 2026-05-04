@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ServisYolcu.Core.DTOs.Auth;
 using ServisYolcu.Core.Entities;
+using ServisYolcu.Core.Enums;
 using ServisYolcu.Core.Interfaces;
 using ServisYolcu.Infrastructure.Data;
 
@@ -23,14 +24,48 @@ public class AuthService : IAuthService
         if (emailExists)
             throw new InvalidOperationException("Bu e-posta adresi zaten kullanılıyor.");
 
+        Company? company = null;
+        if (dto.Role == UserRole.Passenger)
+        {
+            if (string.IsNullOrEmpty(dto.CompanyCode))
+                throw new InvalidOperationException("Yolcu kaydı için şirket kodu gereklidir.");
+
+            company = await _context.Companies.FirstOrDefaultAsync(c => c.CompanyCode == dto.CompanyCode && c.IsActive);
+            if (company == null)
+                throw new InvalidOperationException("Geçersiz şirket kodu.");
+        }
+        else if (dto.Role == UserRole.Driver || dto.Role == UserRole.Admin)
+        {
+            // Admin veya Driver için varsayılan bir company oluştur veya mevcut birini kullan
+            // Şimdilik basit tutalım, belki admin için ayrı logic
+            company = await _context.Companies.FirstOrDefaultAsync(c => c.CompanyCode == "DEFAULT" && c.IsActive);
+            if (company == null)
+            {
+                company = new Company
+                {
+                    Name = "Default Company",
+                    CompanyCode = "DEFAULT"
+                };
+                _context.Companies.Add(company);
+                await _context.SaveChangesAsync();
+            }
+        }
+
         var user = new User
         {
             FirstName = dto.FirstName,
             LastName = dto.LastName,
             Email = dto.Email.ToLower(),
             PhoneNumber = dto.PhoneNumber,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password)
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
+            Role = dto.Role,
+            CompanyId = company!.Id
         };
+
+        if (dto.Role == UserRole.Driver)
+        {
+            user.RefNumber = GenerateRefNumber();
+        }
 
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
@@ -100,5 +135,10 @@ public class AuthService : IAuthService
             RefreshToken = refreshTokenValue,
             AccessTokenExpiry = DateTime.UtcNow.AddMinutes(60)
         };
+    }
+
+    private string GenerateRefNumber()
+    {
+        return Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper();
     }
 }

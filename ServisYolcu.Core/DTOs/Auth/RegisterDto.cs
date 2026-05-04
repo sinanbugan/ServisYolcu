@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ServisYolcu.Core.Enums;
 
 namespace ServisYolcu.Core.DTOs.Auth;
 
@@ -22,4 +23,9 @@ public class RegisterDto
 
     [Phone]
     public string PhoneNumber { get; set; } = string.Empty;
+
+    [Required]
+    public UserRole Role { get; set; } = UserRole.Passenger;
+
+    public string? CompanyCode { get; set; }
 }

@@ -12,7 +12,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Database
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"),
+        b => b.MigrationsAssembly("ServisYolcu.Infrastructure")));
 
 // Services
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -89,13 +90,11 @@ var app = builder.Build();
 // Middleware pipeline
 app.UseMiddleware<ExceptionMiddleware>();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Servis Yolcu API v1"));
-}
+app.UseSwagger();
+app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Servis Yolcu API v1"));
 
-app.UseHttpsRedirection();
+
+//app.UseHttpsRedirection();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();

@@ -15,10 +15,18 @@ public class AppDbContext : DbContext
     public DbSet<Menu> Menus => Set<Menu>();
     public DbSet<MenuRole> MenuRoles => Set<MenuRole>();
     public DbSet<Stop> Stops => Set<Stop>();
+    public DbSet<Company> Companies => Set<Company>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<Company>(entity =>
+        {
+            entity.HasIndex(c => c.CompanyCode).IsUnique();
+            entity.Property(c => c.Name).IsRequired().HasMaxLength(100);
+            entity.Property(c => c.CompanyCode).IsRequired().HasMaxLength(50);
+        });
 
         modelBuilder.Entity<User>(entity =>
         {
@@ -26,6 +34,12 @@ public class AppDbContext : DbContext
             entity.Property(u => u.Email).IsRequired().HasMaxLength(100);
             entity.Property(u => u.FirstName).IsRequired().HasMaxLength(50);
             entity.Property(u => u.LastName).IsRequired().HasMaxLength(50);
+            entity.Property(u => u.RefNumber).HasMaxLength(50);
+
+            entity.HasOne(u => u.Company)
+                  .WithMany(c => c.Users)
+                  .HasForeignKey(u => u.CompanyId)
+                  .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<RefreshToken>(entity =>
@@ -70,6 +84,11 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Route>(entity =>
         {
             entity.Property(r => r.PricePerSeat).HasColumnType("decimal(10,2)");
+
+            entity.HasOne(r => r.Company)
+                  .WithMany(c => c.Routes)
+                  .HasForeignKey(r => r.CompanyId)
+                  .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Stop>(entity =>
@@ -81,6 +100,11 @@ public class AppDbContext : DbContext
                   .WithMany(r => r.Stops)
                   .HasForeignKey(s => s.RouteId)
                   .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(s => s.Company)
+                  .WithMany(c => c.Stops)
+                  .HasForeignKey(s => s.CompanyId)
+                  .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Menu>(entity =>

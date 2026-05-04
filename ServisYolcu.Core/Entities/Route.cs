@@ -10,6 +10,9 @@ public class Route
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    public int CompanyId { get; set; }
+    public Company Company { get; set; } = null!;
+
     public ICollection<Trip> Trips { get; set; } = new List<Trip>();
     public ICollection<Stop> Stops { get; set; } = new List<Stop>();
 }
