@@ -15,15 +15,23 @@ public class TripService : ITripService
         _context = context;
     }
 
-    public async Task<IEnumerable<TripDto>> GetAvailableTripsAsync(int companyId)
-    {
-        return await _context.Trips
-            .Include(t => t.Route)
-            .Include(t => t.Driver)
-            .Where(t => t.IsActive && t.AvailableSeats > 0 && t.DepartureTime > DateTime.UtcNow && t.Route.CompanyId == companyId)
-            .Select(t => MapToDto(t))
-            .ToListAsync();
-    }
+        public async Task<IEnumerable<TripDto>> GetAvailableTripsAsync(int companyId)
+        {
+            var trips = await _context.Trips
+                .Include(t => t.Route)
+                .Include(t => t.Driver)
+                .Where(t => t.IsActive && t.AvailableSeats > 0 && t.Route.CompanyId == companyId)
+                .ToListAsync();
+
+            var result = new List<TripDto>();
+            foreach (var t in trips)
+            {
+                if (t.AvailableSeats > 0)
+                    result.Add(MapToDto(t));
+            }
+
+            return result;
+        }
 
     public async Task<TripDto?> GetTripByIdAsync(int id)
     {
@@ -35,7 +43,7 @@ public class TripService : ITripService
         return trip is null ? null : MapToDto(trip);
     }
 
-    public async Task<TripDetailDto?> GetTripDetailAsync(int id)
+    public async Task<TripDetailDto?> GetTripDetailAsync(int id, DateTime? date = null)
     {
         var trip = await _context.Trips
             .Include(t => t.Route)
@@ -61,8 +69,40 @@ public class TripService : ITripService
                 FullName      = $"{r.Passenger.FirstName} {r.Passenger.LastName}",
                 PhoneNumber   = r.Passenger.PhoneNumber,
                 SeatCount     = r.SeatCount,
-                Status        = r.Status.ToString()
+                Status        = r.Status.ToString(),
+                IsMonthly     = false,
+                IsComing      = r.Status == ReservationStatus.Confirmed
             }).ToList();
+
+        // include monthly subscribers for the queried date (use provided date or today)
+        var queryDate = date?.ToUniversalTime().Date ?? DateTime.UtcNow.Date;
+        var monthly = await _context.MonthlyReservations
+            .Include(m => m.Passenger)
+            .Where(m => m.TripId == trip.Id && m.Year == queryDate.Year && m.Month == queryDate.Month)
+            .ToListAsync();
+
+        // exclude passengers who already have a reservation to avoid duplicates
+        var existingPassengerIds = trip.Reservations.Select(r => r.PassengerId).ToHashSet();
+
+        // For the queried trip date, include monthly subscribers as coming or not coming
+        var day = queryDate.Day;
+        var monthlyDtos = monthly
+            .Where(m => !existingPassengerIds.Contains(m.PassengerId))
+            .Select(m => new PassengerInfoDto
+            {
+                ReservationId = 0,
+                PassengerId = m.PassengerId,
+                FullName = m.Passenger is null ? string.Empty : $"{m.Passenger.FirstName} {m.Passenger.LastName}",
+                PhoneNumber = m.Passenger?.PhoneNumber ?? string.Empty,
+                SeatCount = 1,
+                IsMonthly = true,
+                IsComing = !ParseDaysOff(m.DaysOff).Contains(day),
+                Status = !ParseDaysOff(m.DaysOff).Contains(day) ? "Monthly" : "Monthly-Off"
+            }).ToList();
+
+        unassigned.AddRange(monthlyDtos);
+
+        var monthlyCount = monthlyDtos.Count(m => m.IsComing);
 
         return new TripDetailDto
         {
@@ -74,7 +114,7 @@ public class TripService : ITripService
             PricePerSeat         = trip.Route.PricePerSeat,
             DepartureTime        = trip.DepartureTime,
             TotalSeats           = trip.TotalSeats,
-            AvailableSeats       = trip.AvailableSeats,
+            AvailableSeats       = trip.AvailableSeats - monthlyCount,
             VehiclePlate         = trip.VehiclePlate,
             DriverId             = trip.DriverId,
             DriverName           = $"{trip.Driver.FirstName} {trip.Driver.LastName}",
@@ -96,7 +136,9 @@ public class TripService : ITripService
                                                                 FullName      = $"{r.Passenger.FirstName} {r.Passenger.LastName}",
                                                                 PhoneNumber   = r.Passenger.PhoneNumber,
                                                                 SeatCount     = r.SeatCount,
-                                                                Status        = r.Status.ToString()
+                                                                                                                                Status        = r.Status.ToString(),
+                                                                                                                                IsMonthly     = false,
+                                                                                                                                IsComing      = r.Status == ReservationStatus.Confirmed
                                                             }).ToList()
                                                           : new List<PassengerInfoDto>()
                                        }).ToList()
@@ -211,7 +253,7 @@ public class TripService : ITripService
         await _context.SaveChangesAsync();
     }
 
-    private static TripDto MapToDto(Trip t) => new()
+    private static TripDto MapToDto(Trip t, int? effectiveAvailable = null) => new()
     {
         Id = t.Id,
         RouteId = t.RouteId,
@@ -220,10 +262,19 @@ public class TripService : ITripService
         EndPoint = t.Route.EndPoint,
         DepartureTime = t.DepartureTime,
         TotalSeats = t.TotalSeats,
-        AvailableSeats = t.AvailableSeats,
+        AvailableSeats = effectiveAvailable ?? t.AvailableSeats,
         VehiclePlate = t.VehiclePlate,
         DriverId = t.DriverId,
         DriverName = $"{t.Driver.FirstName} {t.Driver.LastName}",
         PricePerSeat = t.Route.PricePerSeat
     };
+
+    private static List<int> ParseDaysOff(string csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv)) return new List<int>();
+        return csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                  .Select(s => int.TryParse(s, out var v) ? v : 0)
+                  .Where(v => v > 0)
+                  .ToList();
+    }
 }
