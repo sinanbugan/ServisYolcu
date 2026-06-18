@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<Route> Routes => Set<Route>();
     public DbSet<Trip> Trips => Set<Trip>();
     public DbSet<Reservation> Reservations => Set<Reservation>();
+      public DbSet<MonthlyReservation> MonthlyReservations => Set<MonthlyReservation>();
     public DbSet<Menu> Menus => Set<Menu>();
     public DbSet<MenuRole> MenuRoles => Set<MenuRole>();
     public DbSet<Stop> Stops => Set<Stop>();
@@ -129,6 +130,21 @@ public class AppDbContext : DbContext
                   .WithMany(m => m.MenuRoles)
                   .HasForeignKey(mr => mr.MenuId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MonthlyReservation>(entity =>
+        {
+            entity.Property(m => m.DaysOff).HasMaxLength(200);
+
+            entity.HasOne(m => m.Trip)
+                  .WithMany()
+                  .HasForeignKey(m => m.TripId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(m => m.Passenger)
+                  .WithMany()
+                  .HasForeignKey(m => m.PassengerId)
+                  .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

@@ -27,9 +27,9 @@ public class TripsController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    public async Task<ActionResult<TripDetailDto>> GetById(int id)
+    public async Task<ActionResult<TripDetailDto>> GetById(int id, [FromQuery] DateTime? date)
     {
-        var trip = await _tripService.GetTripDetailAsync(id);
+        var trip = await _tripService.GetTripDetailAsync(id, date);
         if (trip is null) return NotFound();
         return Ok(trip);
     }

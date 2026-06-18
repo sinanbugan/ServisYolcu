@@ -60,6 +60,8 @@ public class PassengerInfoDto
     public string PhoneNumber { get; set; } = string.Empty;
     public int SeatCount { get; set; }
     public string Status { get; set; } = string.Empty;
+    public bool IsMonthly { get; set; }
+    public bool IsComing { get; set; }
 }
 
 public class StopDetailDto

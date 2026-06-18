@@ -22,6 +22,7 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ITripService, TripService>();
 builder.Services.AddScoped<IRouteService, RouteService>();
 builder.Services.AddScoped<IMenuService, MenuService>();
+builder.Services.AddScoped<IMonthlyReservationService, MonthlyReservationService>();
 
 // JWT Authentication
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
@@ -86,6 +87,16 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+// Support one-off seeding via command line: dotnet run --project ServisYolcu.API -- seed
+if (args.Contains("seed"))
+{
+    using var scope = app.Services.CreateScope();
+    var services = scope.ServiceProvider;
+    await Seed.SeedData.InitializeAsync(services);
+    Console.WriteLine("Seeding completed.");
+    return;
+}
 
 // Middleware pipeline
 app.UseMiddleware<ExceptionMiddleware>();

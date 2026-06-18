@@ -6,7 +6,7 @@ public interface ITripService
 {
     Task<IEnumerable<TripDto>> GetAvailableTripsAsync(int companyId);
     Task<TripDto?> GetTripByIdAsync(int id);
-    Task<TripDetailDto?> GetTripDetailAsync(int id);
+    Task<TripDetailDto?> GetTripDetailAsync(int id, DateTime? date = null);
     Task<TripDto> CreateTripAsync(int driverId, CreateTripDto dto);
     Task<IEnumerable<TripDto>> GetDriverTripsAsync(int driverId);
     Task<ReservationDto> CreateReservationAsync(int passengerId, CreateReservationDto dto);
