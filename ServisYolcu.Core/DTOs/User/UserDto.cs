@@ -12,4 +12,5 @@ public class UserDto
     public UserRole Role { get; set; }
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
+    public int CompanyId { get; set; }
 }

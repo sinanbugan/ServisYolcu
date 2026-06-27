@@ -5,7 +5,7 @@ namespace ServisYolcu.Core.Interfaces;
 
 public interface IUserService
 {
-    Task<IEnumerable<UserDto>> GetAllUsersAsync();
+    Task<IEnumerable<UserDto>> GetAllUsersAsync(int companyId);
     Task<UserDto?> GetUserByIdAsync(int id);
     Task<UserDto> UpdateUserRoleAsync(int id, UserRole role);
     Task DeactivateUserAsync(int id);

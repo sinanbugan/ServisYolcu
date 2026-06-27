@@ -15,9 +15,9 @@ public class UserService : IUserService
         _context = context;
     }
 
-    public async Task<IEnumerable<UserDto>> GetAllUsersAsync()
+    public async Task<IEnumerable<UserDto>> GetAllUsersAsync(int companyId)
     {
-        return await _context.Users
+        return await _context.Users.Where(x=> x.CompanyId==companyId)
             .Select(u => new UserDto
             {
                 Id = u.Id,
@@ -27,7 +27,8 @@ public class UserService : IUserService
                 PhoneNumber = u.PhoneNumber,
                 Role = u.Role,
                 IsActive = u.IsActive,
-                CreatedAt = u.CreatedAt
+                CreatedAt = u.CreatedAt,
+                CompanyId= u.CompanyId
             })
             .ToListAsync();
     }

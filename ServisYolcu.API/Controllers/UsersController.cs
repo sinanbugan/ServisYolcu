@@ -23,7 +23,8 @@ public class UsersController : ControllerBase
     [Authorize(Roles = "Admin")]
     public async Task<ActionResult<IEnumerable<UserDto>>> GetAll()
     {
-        var users = await _userService.GetAllUsersAsync();
+        var companyId = int.Parse(User.FindFirstValue("CompanyId")!);
+        var users = await _userService.GetAllUsersAsync(companyId);
         return Ok(users);
     }
 
