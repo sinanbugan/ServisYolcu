@@ -60,6 +60,18 @@ public class TripService : ITripService
             .GroupBy(r => r.BoardingStopId!.Value)
             .ToDictionary(g => g.Key, g => g.ToList());
 
+        // include monthly subscribers for the queried date (use provided date or today)
+        var queryDate = date?.Date ?? DateTime.UtcNow.Date;
+        var day = queryDate.Day;
+        var monthly = await _context.MonthlyReservations
+            .Include(m => m.Passenger)
+            .Where(m => m.TripId == trip.Id && m.Year == queryDate.Year && m.Month == queryDate.Month)
+            .ToListAsync();
+
+        var monthlyByPassenger = monthly
+            .GroupBy(m => m.PassengerId)
+            .ToDictionary(g => g.Key, g => g.First());
+
         var unassigned = trip.Reservations
             .Where(r => !r.BoardingStopId.HasValue)
             .Select(r => new PassengerInfoDto
@@ -71,21 +83,13 @@ public class TripService : ITripService
                 SeatCount     = r.SeatCount,
                 Status        = r.Status.ToString(),
                 IsMonthly     = false,
-                IsComing      = r.Status == ReservationStatus.Confirmed
+                IsComing      = IsPassengerComing(r, monthlyByPassenger, day)
             }).ToList();
-
-        // include monthly subscribers for the queried date (use provided date or today)
-        var queryDate = date?.ToUniversalTime().Date ?? DateTime.UtcNow.Date;
-        var monthly = await _context.MonthlyReservations
-            .Include(m => m.Passenger)
-            .Where(m => m.TripId == trip.Id && m.Year == queryDate.Year && m.Month == queryDate.Month)
-            .ToListAsync();
 
         // exclude passengers who already have a reservation to avoid duplicates
         var existingPassengerIds = trip.Reservations.Select(r => r.PassengerId).ToHashSet();
 
         // For the queried trip date, include monthly subscribers as coming or not coming
-        var day = queryDate.Day;
         var monthlyDtos = monthly
             .Where(m => !existingPassengerIds.Contains(m.PassengerId))
             .Select(m => new PassengerInfoDto
@@ -138,7 +142,7 @@ public class TripService : ITripService
                                                                 SeatCount     = r.SeatCount,
                                                                                                                                 Status        = r.Status.ToString(),
                                                                                                                                 IsMonthly     = false,
-                                                                                                                                IsComing      = r.Status == ReservationStatus.Confirmed
+                                                                                                                                IsComing      = IsPassengerComing(r, monthlyByPassenger, day)
                                                             }).ToList()
                                                           : new List<PassengerInfoDto>()
                                        }).ToList()
@@ -268,6 +272,17 @@ public class TripService : ITripService
         DriverName = $"{t.Driver.FirstName} {t.Driver.LastName}",
         PricePerSeat = t.Route.PricePerSeat
     };
+
+    private static bool IsPassengerComing(Reservation reservation, IReadOnlyDictionary<int, MonthlyReservation> monthlyByPassenger, int day)
+    {
+        if (reservation.Status != ReservationStatus.Confirmed)
+            return false;
+
+        if (!monthlyByPassenger.TryGetValue(reservation.PassengerId, out var monthlyReservation))
+            return true;
+
+        return !ParseDaysOff(monthlyReservation.DaysOff).Contains(day);
+    }
 
     private static List<int> ParseDaysOff(string csv)
     {
