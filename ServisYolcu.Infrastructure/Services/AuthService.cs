@@ -25,31 +25,15 @@ public class AuthService : IAuthService
             throw new InvalidOperationException("Bu e-posta adresi zaten kullanılıyor.");
 
         Company? company = null;
-        if (dto.Role == UserRole.Passenger)
-        {
+       
             if (string.IsNullOrEmpty(dto.CompanyCode))
                 throw new InvalidOperationException("Yolcu kaydı için şirket kodu gereklidir.");
 
             company = await _context.Companies.FirstOrDefaultAsync(c => c.CompanyCode == dto.CompanyCode && c.IsActive);
             if (company == null)
                 throw new InvalidOperationException("Geçersiz şirket kodu.");
-        }
-        else if (dto.Role == UserRole.Driver || dto.Role == UserRole.Admin)
-        {
-            // Admin veya Driver için varsayılan bir company oluştur veya mevcut birini kullan
-            // Şimdilik basit tutalım, belki admin için ayrı logic
-            company = await _context.Companies.FirstOrDefaultAsync(c => c.CompanyCode == "DEFAULT" && c.IsActive);
-            if (company == null)
-            {
-                company = new Company
-                {
-                    Name = "Default Company",
-                    CompanyCode = "DEFAULT"
-                };
-                _context.Companies.Add(company);
-                await _context.SaveChangesAsync();
-            }
-        }
+        
+       
 
         var user = new User
         {
