@@ -17,6 +17,8 @@ public class AppDbContext : DbContext
     public DbSet<MenuRole> MenuRoles => Set<MenuRole>();
     public DbSet<Stop> Stops => Set<Stop>();
     public DbSet<Company> Companies => Set<Company>();
+    public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
+    public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -145,6 +147,25 @@ public class AppDbContext : DbContext
                   .WithMany()
                   .HasForeignKey(m => m.PassengerId)
                   .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DeviceToken>(entity =>
+        {
+            entity.HasIndex(dt => dt.Token).IsUnique();
+            entity.Property(dt => dt.Token).IsRequired().HasMaxLength(500);
+            entity.Property(dt => dt.Platform).HasMaxLength(50);
+
+            entity.HasOne(dt => dt.User)
+                  .WithMany()
+                  .HasForeignKey(dt => dt.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<NotificationLog>(entity =>
+        {
+            entity.Property(nl => nl.Title).IsRequired().HasMaxLength(200);
+            entity.Property(nl => nl.Body).IsRequired().HasMaxLength(500);
+            entity.Property(nl => nl.Type).IsRequired().HasMaxLength(100);
         });
     }
 }

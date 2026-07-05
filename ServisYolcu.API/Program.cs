@@ -23,6 +23,7 @@ builder.Services.AddScoped<ITripService, TripService>();
 builder.Services.AddScoped<IRouteService, RouteService>();
 builder.Services.AddScoped<IMenuService, MenuService>();
 builder.Services.AddScoped<IMonthlyReservationService, MonthlyReservationService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 
 // JWT Authentication
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");

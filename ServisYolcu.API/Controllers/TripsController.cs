@@ -38,7 +38,29 @@ public class TripsController : ControllerBase
     [Authorize(Roles = "Driver,Admin")]
     public async Task<ActionResult<TripDto>> Create([FromBody] CreateTripDto dto)
     {
-        var driverId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var currentUserId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+        int driverId;
+        if (User.IsInRole("Driver"))
+        {
+            // Drivers always create trips for themselves
+            driverId = currentUserId;
+        }
+        else if (User.IsInRole("Admin"))
+        {
+            // Admins must explicitly provide a DriverId
+            if (!dto.DriverId.HasValue || dto.DriverId.Value <= 0)
+            {
+                return BadRequest(new { error = "Şoför bilgisi gereklidir." });
+            }
+            driverId = dto.DriverId.Value;
+        }
+        else
+        {
+            // Fallback for any other allowed roles: use current user
+            driverId = (dto.DriverId.HasValue && dto.DriverId.Value > 0) ? dto.DriverId.Value : currentUserId;
+        }
+
         var trip = await _tripService.CreateTripAsync(driverId, dto);
         return CreatedAtAction(nameof(GetById), new { id = trip.Id }, trip);
     }

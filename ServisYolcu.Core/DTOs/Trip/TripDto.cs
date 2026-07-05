@@ -16,6 +16,10 @@ public class CreateTripDto
 
     [MaxLength(20)]
     public string? VehiclePlate { get; set; }
+
+    // Optional: when creating a trip as Admin, you may set the driver explicitly.
+    // If not provided or <= 0, controller will fall back to the authenticated user id.
+    public int? DriverId { get; set; }
 }
 
 public class TripDto
