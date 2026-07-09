@@ -15,22 +15,18 @@ public class TripService : ITripService
         _context = context;
     }
 
-        public async Task<IEnumerable<TripDto>> GetAvailableTripsAsync(int companyId)
+        public async Task<IEnumerable<TripDto>> GetAvailableTripsAsync(int companyId, int passengerId)
         {
-            var trips = await _context.Trips
+            return await _context.Trips
                 .Include(t => t.Route)
                 .Include(t => t.Driver)
-                .Where(t => t.IsActive && t.AvailableSeats > 0 && t.Route.CompanyId == companyId)
+                .Where(t =>
+                    t.IsActive &&
+                    t.AvailableSeats > 0 &&
+                    t.Route.CompanyId == companyId &&
+                    !t.Reservations.Any(r => r.PassengerId == passengerId && r.Status != ReservationStatus.Cancelled))
+                .Select(t => MapToDto(t))
                 .ToListAsync();
-
-            var result = new List<TripDto>();
-            foreach (var t in trips)
-            {
-                if (t.AvailableSeats > 0)
-                    result.Add(MapToDto(t));
-            }
-
-            return result;
         }
 
     public async Task<TripDto?> GetTripByIdAsync(int id)

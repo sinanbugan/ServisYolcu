@@ -22,7 +22,8 @@ public class TripsController : ControllerBase
     public async Task<ActionResult<IEnumerable<TripDto>>> GetAvailable()
     {
         var companyId = int.Parse(User.FindFirstValue("CompanyId")!);
-        var trips = await _tripService.GetAvailableTripsAsync(companyId);
+        var passengerId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var trips = await _tripService.GetAvailableTripsAsync(companyId, passengerId);
         return Ok(trips);
     }
 
