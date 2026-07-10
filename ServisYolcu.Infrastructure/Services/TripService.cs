@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using ServisYolcu.Core.DTOs.Trip;
 using ServisYolcu.Core.Entities;
+using ServisYolcu.Core.Enums;
 using ServisYolcu.Core.Interfaces;
+using ServisYolcu.Core.Utilities;
 using ServisYolcu.Infrastructure.Data;
 
 namespace ServisYolcu.Infrastructure.Services;
@@ -9,25 +11,37 @@ namespace ServisYolcu.Infrastructure.Services;
 public class TripService : ITripService
 {
     private readonly AppDbContext _context;
+    private readonly IAppClock _clock;
 
-    public TripService(AppDbContext context)
+    public TripService(AppDbContext context, IAppClock clock)
     {
         _context = context;
+        _clock = clock;
     }
 
-        public async Task<IEnumerable<TripDto>> GetAvailableTripsAsync(int companyId, int passengerId)
-        {
-            return await _context.Trips
-                .Include(t => t.Route)
-                .Include(t => t.Driver)
-                .Where(t =>
-                    t.IsActive &&
-                    t.AvailableSeats > 0 &&
-                    t.Route.CompanyId == companyId &&
-                    !t.Reservations.Any(r => r.PassengerId == passengerId && r.Status != ReservationStatus.Cancelled))
-                .Select(t => MapToDto(t))
-                .ToListAsync();
-        }
+    public async Task<IEnumerable<TripDto>> GetAvailableTripsAsync(int companyId, int passengerId, TripDirection? direction = null)
+    {
+        var query = _context.Trips
+            .Include(t => t.Route)
+            .Include(t => t.Driver)
+            .Where(t => t.IsActive && t.Route.CompanyId == companyId);
+
+        if (direction.HasValue)
+            query = query.Where(t => t.Direction == direction.Value);
+
+        // Gidiş seferlerinde yolcunun zaten aktif rezervasyonu olan sefer tekrar listelenmez.
+        // Dönüş seferlerinde Reservation kavramı yoktur (koltuk günlük kararla tutulur),
+        // bu yüzden o filtre uygulanmaz.
+        query = query.Where(t =>
+            t.Direction == TripDirection.Return ||
+            (t.AvailableSeats > 0 &&
+             !t.Reservations.Any(r => r.PassengerId == passengerId && r.Status != ReservationStatus.Cancelled)));
+
+        // Önce entity'leri çek: MapToDto çevrilebilir bir ifade değil ve entity döndürmeyen
+        // bir projeksiyonda Include'lar yok sayılabilir (Route/Driver null gelirdi).
+        var trips = await query.ToListAsync();
+        return trips.Select(t => MapToDto(t)).ToList();
+    }
 
     public async Task<TripDto?> GetTripByIdAsync(int id)
     {
@@ -39,7 +53,7 @@ public class TripService : ITripService
         return trip is null ? null : MapToDto(trip);
     }
 
-    public async Task<TripDetailDto?> GetTripDetailAsync(int id, DateTime? date = null)
+    public async Task<TripDetailDto?> GetTripDetailAsync(int id, DateOnly? date = null)
     {
         var trip = await _context.Trips
             .Include(t => t.Route)
@@ -51,97 +65,158 @@ public class TripService : ITripService
 
         if (trip is null) return null;
 
-        var reservationsByStop = trip.Reservations
-            .Where(r => r.BoardingStopId.HasValue)
-            .GroupBy(r => r.BoardingStopId!.Value)
-            .ToDictionary(g => g.Key, g => g.ToList());
+        // Gün sınırı yerel takvime göre; UtcNow.Date gece yarısı civarında bir gün kaydırırdı.
+        var queryDate = date ?? _clock.LocalToday;
 
-        // include monthly subscribers for the queried date (use provided date or today)
-        var queryDate = date?.Date ?? DateTime.UtcNow.Date;
-        var day = queryDate.Day;
+        var roster = trip.Direction == TripDirection.Return
+            ? await BuildReturnRosterAsync(trip, queryDate)
+            : await BuildOutboundRosterAsync(trip, queryDate);
+
+        return AssembleDetail(trip, queryDate, roster);
+    }
+
+    /// <summary>Bir yolcunun manifestodaki satırı ve hangi durakta gösterileceği.</summary>
+    private sealed record RosterEntry(PassengerInfoDto Passenger, int? DisplayStopId);
+
+    private async Task<List<RosterEntry>> BuildOutboundRosterAsync(Trip trip, DateOnly date)
+    {
         var monthly = await _context.MonthlyReservations
             .Include(m => m.Passenger)
-            .Where(m => m.TripId == trip.Id && m.Year == queryDate.Year && m.Month == queryDate.Month)
+            .Where(m => m.TripId == trip.Id
+                        && m.Direction == TripDirection.Outbound
+                        && m.Year == date.Year
+                        && m.Month == date.Month)
             .ToListAsync();
 
         var monthlyByPassenger = monthly
             .GroupBy(m => m.PassengerId)
             .ToDictionary(g => g.Key, g => g.First());
 
-        var unassigned = trip.Reservations
-            .Where(r => !r.BoardingStopId.HasValue)
-            .Select(r => new PassengerInfoDto
-            {
-                ReservationId = r.Id,
-                PassengerId   = r.PassengerId,
-                FullName      = $"{r.Passenger.FirstName} {r.Passenger.LastName}",
-                PhoneNumber   = r.Passenger.PhoneNumber,
-                SeatCount     = r.SeatCount,
-                Status        = r.Status.ToString(),
-                IsMonthly     = false,
-                IsComing      = IsPassengerComing(r, monthlyByPassenger, day)
-            }).ToList();
+        var entries = new List<RosterEntry>();
 
-        // exclude passengers who already have a reservation to avoid duplicates
+        foreach (var r in trip.Reservations)
+        {
+            var coming = IsOutboundPassengerComing(r, monthlyByPassenger, date.Day);
+            entries.Add(new RosterEntry(
+                new PassengerInfoDto
+                {
+                    ReservationId = r.Id,
+                    PassengerId = r.PassengerId,
+                    FullName = $"{r.Passenger.FirstName} {r.Passenger.LastName}",
+                    PhoneNumber = r.Passenger.PhoneNumber,
+                    SeatCount = r.SeatCount,
+                    Status = r.Status.ToString(),
+                    IsMonthly = false,
+                    IsComing = coming,
+                    State = coming ? ReturnAttendanceState.Confirmed : ReturnAttendanceState.NotComing,
+                },
+                r.BoardingStopId));
+        }
+
+        // Rezervasyonu olan yolcuları iki kez listelememek için hariç tut.
         var existingPassengerIds = trip.Reservations.Select(r => r.PassengerId).ToHashSet();
 
-        // For the queried trip date, include monthly subscribers as coming or not coming
-        var monthlyDtos = monthly
-            .Where(m => !existingPassengerIds.Contains(m.PassengerId))
-            .Select(m => new PassengerInfoDto
-            {
-                ReservationId = 0,
-                PassengerId = m.PassengerId,
-                FullName = m.Passenger is null ? string.Empty : $"{m.Passenger.FirstName} {m.Passenger.LastName}",
-                PhoneNumber = m.Passenger?.PhoneNumber ?? string.Empty,
-                SeatCount = 1,
-                IsMonthly = true,
-                IsComing = !ParseDaysOff(m.DaysOff).Contains(day),
-                Status = !ParseDaysOff(m.DaysOff).Contains(day) ? "Monthly" : "Monthly-Off"
-            }).ToList();
+        foreach (var m in monthly.Where(m => !existingPassengerIds.Contains(m.PassengerId)))
+        {
+            var coming = !DayList.Parse(m.DaysOff).Contains(date.Day);
+            entries.Add(new RosterEntry(
+                new PassengerInfoDto
+                {
+                    ReservationId = 0,
+                    PassengerId = m.PassengerId,
+                    FullName = m.Passenger is null ? string.Empty : $"{m.Passenger.FirstName} {m.Passenger.LastName}",
+                    PhoneNumber = m.Passenger?.PhoneNumber ?? string.Empty,
+                    SeatCount = 1,
+                    IsMonthly = true,
+                    IsComing = coming,
+                    State = coming ? ReturnAttendanceState.Confirmed : ReturnAttendanceState.NotComing,
+                    Status = coming ? "Monthly" : "Monthly-Off",
+                },
+                m.BoardingStopId));
+        }
 
-        unassigned.AddRange(monthlyDtos);
+        return entries;
+    }
 
-        var monthlyCount = monthlyDtos.Count(m => m.IsComing);
+    private async Task<List<RosterEntry>> BuildReturnRosterAsync(Trip trip, DateOnly date)
+    {
+        var rows = await ReturnRoster.BuildAsync(_context, trip.Id, date);
+
+        // Şablondaki durak bu seferin rotasına ait değilse (rota sonradan düzenlenmişse)
+        // yolcuyu duraksız listele; aksi hâlde manifestoda hiç görünmezdi.
+        var stopIds = trip.Route.Stops.Select(s => s.Id).ToHashSet();
+
+        return rows.Select(row =>
+        {
+            var displayStopId = row.BoardingStopId is not null && stopIds.Contains(row.BoardingStopId.Value)
+                ? row.BoardingStopId
+                : null;
+
+            return new RosterEntry(
+                new PassengerInfoDto
+                {
+                    ReservationId = 0,
+                    PassengerId = row.PassengerId,
+                    FullName = row.Passenger is null ? string.Empty : $"{row.Passenger.FirstName} {row.Passenger.LastName}",
+                    PhoneNumber = row.Passenger?.PhoneNumber ?? string.Empty,
+                    SeatCount = 1,
+                    IsMonthly = row.HasTemplate,
+                    IsComing = row.State != ReturnAttendanceState.NotComing,
+                    State = row.State,
+                    Status = row.State.ToString(),
+                },
+                displayStopId);
+        }).ToList();
+    }
+
+    private static TripDetailDto AssembleDetail(Trip trip, DateOnly date, List<RosterEntry> roster)
+    {
+        var byStop = roster
+            .Where(e => e.DisplayStopId.HasValue)
+            .GroupBy(e => e.DisplayStopId!.Value)
+            .ToDictionary(g => g.Key, g => g.Select(e => e.Passenger).ToList());
+
+        var unassigned = roster
+            .Where(e => !e.DisplayStopId.HasValue)
+            .Select(e => e.Passenger)
+            .ToList();
+
+        // Gidişte saklanan AvailableSeats rezervasyonlarla güncelleniyor; aylık aboneler
+        // yalnızca okuma anında düşülüyor. Dönüşte Reservation yok, bu yüzden müsaitlik
+        // tamamen o günün roster'ından hesaplanır.
+        var availableSeats = trip.Direction == TripDirection.Return
+            ? trip.TotalSeats - roster.Count(e => e.Passenger.IsComing)
+            : trip.AvailableSeats - roster.Count(e => e.Passenger.IsMonthly && e.Passenger.IsComing);
 
         return new TripDetailDto
         {
-            Id                   = trip.Id,
-            RouteId              = trip.RouteId,
-            RouteName            = trip.Route.Name,
-            StartPoint           = trip.Route.StartPoint,
-            EndPoint             = trip.Route.EndPoint,
-            PricePerSeat         = trip.Route.PricePerSeat,
-            DepartureTime        = trip.DepartureTime,
-            TotalSeats           = trip.TotalSeats,
-            AvailableSeats       = trip.AvailableSeats - monthlyCount,
-            VehiclePlate         = trip.VehiclePlate,
-            DriverId             = trip.DriverId,
-            DriverName           = $"{trip.Driver.FirstName} {trip.Driver.LastName}",
+            Id = trip.Id,
+            RouteId = trip.RouteId,
+            RouteName = trip.Route.Name,
+            StartPoint = trip.Route.StartPoint,
+            EndPoint = trip.Route.EndPoint,
+            PricePerSeat = trip.Route.PricePerSeat,
+            DepartureTime = trip.DepartureTime,
+            TotalSeats = trip.TotalSeats,
+            AvailableSeats = Math.Max(0, availableSeats),
+            VehiclePlate = trip.VehiclePlate,
+            DriverId = trip.DriverId,
+            DriverName = $"{trip.Driver.FirstName} {trip.Driver.LastName}",
+            Direction = trip.Direction,
+            Date = date,
             UnassignedPassengers = unassigned,
-            Stops                = trip.Route.Stops
-                                       .Select(s => new StopDetailDto
-                                       {
-                                           Id         = s.Id,
-                                           Name       = s.Name,
-                                           Address    = s.Address,
-                                           Latitude   = s.Latitude,
-                                           Longitude  = s.Longitude,
-                                           Order      = s.Order,
-                                           Passengers = reservationsByStop.TryGetValue(s.Id, out var resvs)
-                                                          ? resvs.Select(r => new PassengerInfoDto
-                                                            {
-                                                                ReservationId = r.Id,
-                                                                PassengerId   = r.PassengerId,
-                                                                FullName      = $"{r.Passenger.FirstName} {r.Passenger.LastName}",
-                                                                PhoneNumber   = r.Passenger.PhoneNumber,
-                                                                SeatCount     = r.SeatCount,
-                                                                                                                                Status        = r.Status.ToString(),
-                                                                                                                                IsMonthly     = false,
-                                                                                                                                IsComing      = IsPassengerComing(r, monthlyByPassenger, day)
-                                                            }).ToList()
-                                                          : new List<PassengerInfoDto>()
-                                       }).ToList()
+            Stops = trip.Route.Stops
+                .Select(s => new StopDetailDto
+                {
+                    Id = s.Id,
+                    Name = s.Name,
+                    Address = s.Address,
+                    Latitude = s.Latitude,
+                    Longitude = s.Longitude,
+                    Order = s.Order,
+                    Passengers = byStop.TryGetValue(s.Id, out var list) ? list : new List<PassengerInfoDto>(),
+                })
+                .ToList(),
         };
     }
 
@@ -157,7 +232,8 @@ public class TripService : ITripService
             DepartureTime = dto.DepartureTime,
             TotalSeats = dto.TotalSeats,
             AvailableSeats = dto.TotalSeats,
-            VehiclePlate = dto.VehiclePlate
+            VehiclePlate = dto.VehiclePlate,
+            Direction = dto.Direction,
         };
 
         _context.Trips.Add(trip);
@@ -169,14 +245,18 @@ public class TripService : ITripService
         return MapToDto(trip);
     }
 
-    public async Task<IEnumerable<TripDto>> GetDriverTripsAsync(int driverId)
+    public async Task<IEnumerable<TripDto>> GetDriverTripsAsync(int driverId, TripDirection? direction = null)
     {
-        return await _context.Trips
+        var query = _context.Trips
             .Include(t => t.Route)
             .Include(t => t.Driver)
-            .Where(t => t.DriverId == driverId)
-            .Select(t => MapToDto(t))
-            .ToListAsync();
+            .Where(t => t.DriverId == driverId);
+
+        if (direction.HasValue)
+            query = query.Where(t => t.Direction == direction.Value);
+
+        var trips = await query.ToListAsync();
+        return trips.Select(t => MapToDto(t)).ToList();
     }
 
     public async Task<ReservationDto> CreateReservationAsync(int passengerId, CreateReservationDto dto)
@@ -186,6 +266,10 @@ public class TripService : ITripService
                 .ThenInclude(r => r.Stops)
             .FirstOrDefaultAsync(t => t.Id == dto.TripId && t.IsActive)
             ?? throw new KeyNotFoundException("Sefer bulunamadı.");
+
+        // Dönüş koltukları günlük kararlarla (ReturnDayChoice) tutulur; buradan rezerve edilemez.
+        if (trip.Direction != TripDirection.Outbound)
+            throw new InvalidOperationException("Dönüş seferi için rezervasyon oluşturulamaz. Dönüş planınızı kullanın.");
 
         var stopBelongsToRoute = trip.Route.Stops.Any(s => s.Id == dto.BoardingStopId && s.IsActive);
         if (!stopBelongsToRoute)
@@ -266,10 +350,11 @@ public class TripService : ITripService
         VehiclePlate = t.VehiclePlate,
         DriverId = t.DriverId,
         DriverName = $"{t.Driver.FirstName} {t.Driver.LastName}",
-        PricePerSeat = t.Route.PricePerSeat
+        PricePerSeat = t.Route.PricePerSeat,
+        Direction = t.Direction,
     };
 
-    private static bool IsPassengerComing(Reservation reservation, IReadOnlyDictionary<int, MonthlyReservation> monthlyByPassenger, int day)
+    private static bool IsOutboundPassengerComing(Reservation reservation, IReadOnlyDictionary<int, MonthlyReservation> monthlyByPassenger, int day)
     {
         if (reservation.Status != ReservationStatus.Confirmed)
             return false;
@@ -277,15 +362,6 @@ public class TripService : ITripService
         if (!monthlyByPassenger.TryGetValue(reservation.PassengerId, out var monthlyReservation))
             return true;
 
-        return !ParseDaysOff(monthlyReservation.DaysOff).Contains(day);
-    }
-
-    private static List<int> ParseDaysOff(string csv)
-    {
-        if (string.IsNullOrWhiteSpace(csv)) return new List<int>();
-        return csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                  .Select(s => int.TryParse(s, out var v) ? v : 0)
-                  .Where(v => v > 0)
-                  .ToList();
+        return !DayList.Parse(monthlyReservation.DaysOff).Contains(day);
     }
 }

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ServisYolcu.Core.DTOs.Trip;
+using ServisYolcu.Core.Enums;
 using ServisYolcu.Core.Interfaces;
 
 namespace ServisYolcu.API.Controllers;
@@ -19,16 +20,21 @@ public class TripsController : ControllerBase
 
     [HttpGet]
     [Authorize]
-    public async Task<ActionResult<IEnumerable<TripDto>>> GetAvailable()
+    public async Task<ActionResult<IEnumerable<TripDto>>> GetAvailable([FromQuery] TripDirection? direction)
     {
         var companyId = int.Parse(User.FindFirstValue("CompanyId")!);
         var passengerId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var trips = await _tripService.GetAvailableTripsAsync(companyId, passengerId);
+        var trips = await _tripService.GetAvailableTripsAsync(companyId, passengerId, direction);
         return Ok(trips);
     }
 
+    /// <remarks>
+    /// Manifesto yolcu ad-soyad ve telefonlarını içerir; anonim erişime kapalıdır.
+    /// <paramref name="date"/> verilmezse şirketin yerel takvimine göre bugün kullanılır.
+    /// </remarks>
     [HttpGet("{id}")]
-    public async Task<ActionResult<TripDetailDto>> GetById(int id, [FromQuery] DateTime? date)
+    [Authorize]
+    public async Task<ActionResult<TripDetailDto>> GetById(int id, [FromQuery] DateOnly? date)
     {
         var trip = await _tripService.GetTripDetailAsync(id, date);
         if (trip is null) return NotFound();
@@ -68,10 +74,10 @@ public class TripsController : ControllerBase
 
     [HttpGet("my-trips")]
     [Authorize(Roles = "Driver,Admin")]
-    public async Task<ActionResult<IEnumerable<TripDto>>> GetMyTrips()
+    public async Task<ActionResult<IEnumerable<TripDto>>> GetMyTrips([FromQuery] TripDirection? direction)
     {
         var driverId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var trips = await _tripService.GetDriverTripsAsync(driverId);
+        var trips = await _tripService.GetDriverTripsAsync(driverId, direction);
         return Ok(trips);
     }
 

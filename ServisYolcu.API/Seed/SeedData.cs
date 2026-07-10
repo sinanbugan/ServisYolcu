@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using ServisYolcu.Core.Entities;
+using ServisYolcu.Core.Enums;
 using ServisYolcu.Infrastructure.Data;
 
 namespace Seed;
@@ -69,6 +70,53 @@ public static class SeedData
             await db.SaveChangesAsync();
         }
 
-        Console.WriteLine($"Seeded company {company.Id}, driver {driver.Id}, passenger {passenger.Id}, trip {trip.Id}, monthlyReservation {mr.Id}");
+        // Dönüş rotası ayrı bir Route kaydıdır (iş yeri → ev), rota ters çevrilmez.
+        var returnRoute = await db.Routes.FirstOrDefaultAsync(r => r.Name == "Demo Route (Dönüş)");
+        if (returnRoute == null)
+        {
+            returnRoute = new ServisYolcu.Core.Entities.Route { Name = "Demo Route (Dönüş)", StartPoint = "B", EndPoint = "A", CompanyId = company.Id, PricePerSeat = 25m };
+            db.Routes.Add(returnRoute);
+            await db.SaveChangesAsync();
+        }
+
+        var returnTripDate = new DateTime(nextMonth.Year, nextMonth.Month, 15, 18, 0, 0, DateTimeKind.Utc);
+        var returnTrip = await db.Trips.FirstOrDefaultAsync(t => t.RouteId == returnRoute.Id && t.DepartureTime == returnTripDate);
+        if (returnTrip == null)
+        {
+            returnTrip = new Trip
+            {
+                RouteId = returnRoute.Id,
+                DriverId = driver.Id,
+                DepartureTime = returnTripDate,
+                TotalSeats = 20,
+                AvailableSeats = 20,
+                Direction = TripDirection.Return,
+            };
+            db.Trips.Add(returnTrip);
+            await db.SaveChangesAsync();
+        }
+
+        // Dönüş şablonu: yolcu normalde bu seferle döner, 1 ve 5'i hariç.
+        var returnTemplate = await db.MonthlyReservations.FirstOrDefaultAsync(
+            m => m.PassengerId == passenger.Id
+                 && m.Direction == TripDirection.Return
+                 && m.Year == returnTrip.DepartureTime.Year
+                 && m.Month == returnTrip.DepartureTime.Month);
+        if (returnTemplate == null)
+        {
+            returnTemplate = new MonthlyReservation
+            {
+                PassengerId = passenger.Id,
+                TripId = returnTrip.Id,
+                Year = returnTrip.DepartureTime.Year,
+                Month = returnTrip.DepartureTime.Month,
+                Direction = TripDirection.Return,
+                DaysOff = "1,5",
+            };
+            db.MonthlyReservations.Add(returnTemplate);
+            await db.SaveChangesAsync();
+        }
+
+        Console.WriteLine($"Seeded company {company.Id}, driver {driver.Id}, passenger {passenger.Id}, trip {trip.Id}, monthlyReservation {mr.Id}, returnTrip {returnTrip.Id}, returnTemplate {returnTemplate.Id}");
     }
 }

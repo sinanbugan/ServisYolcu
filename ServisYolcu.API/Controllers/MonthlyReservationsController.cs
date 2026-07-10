@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ServisYolcu.Core.DTOs.Reservation;
+using ServisYolcu.Core.Enums;
 using ServisYolcu.Core.Interfaces;
 
 namespace ServisYolcu.API.Controllers;
@@ -28,10 +29,11 @@ public class MonthlyReservationsController : ControllerBase
 
     [HttpGet("my-monthly")]
     [Authorize(Roles = "Passenger,Admin")]
-    public async Task<ActionResult<IEnumerable<MonthlyReservationDto>>> GetMine([FromQuery] int? year, [FromQuery] int? month)
+    public async Task<ActionResult<IEnumerable<MonthlyReservationDto>>> GetMine(
+        [FromQuery] int? year, [FromQuery] int? month, [FromQuery] TripDirection? direction)
     {
         var passengerId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var list = await _service.GetPassengerMonthlyReservationsAsync(passengerId, year, month);
+        var list = await _service.GetPassengerMonthlyReservationsAsync(passengerId, year, month, direction);
         return Ok(list);
     }
 

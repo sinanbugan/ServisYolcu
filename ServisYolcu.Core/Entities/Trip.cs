@@ -1,3 +1,5 @@
+using ServisYolcu.Core.Enums;
+
 namespace ServisYolcu.Core.Entities;
 
 public class Trip
@@ -9,6 +11,9 @@ public class Trip
     public string? VehiclePlate { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Gidiş mi dönüş bacağı mı. Mevcut tüm seferler Outbound'dur.</summary>
+    public TripDirection Direction { get; set; } = TripDirection.Outbound;
 
     public int RouteId { get; set; }
     public Route Route { get; set; } = null!;

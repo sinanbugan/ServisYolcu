@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ServisYolcu.Core.Enums;
 
 namespace ServisYolcu.Core.DTOs.Trip;
 
@@ -20,6 +21,9 @@ public class CreateTripDto
     // Optional: when creating a trip as Admin, you may set the driver explicitly.
     // If not provided or <= 0, controller will fall back to the authenticated user id.
     public int? DriverId { get; set; }
+
+    /// <summary>Belirtilmezse gidiş seferi oluşturulur.</summary>
+    public TripDirection Direction { get; set; } = TripDirection.Outbound;
 }
 
 public class TripDto
@@ -36,6 +40,7 @@ public class TripDto
     public int DriverId { get; set; }
     public string DriverName { get; set; } = string.Empty;
     public decimal PricePerSeat { get; set; }
+    public TripDirection Direction { get; set; }
 }
 
 public class TripDetailDto
@@ -54,6 +59,10 @@ public class TripDetailDto
     public string? VehiclePlate { get; set; }
     public int DriverId { get; set; }
     public string DriverName { get; set; } = string.Empty;
+    public TripDirection Direction { get; set; }
+
+    /// <summary>Manifestonun hangi güne göre hesaplandığı.</summary>
+    public DateOnly Date { get; set; }
 }
 
 public class PassengerInfoDto
@@ -65,7 +74,15 @@ public class PassengerInfoDto
     public int SeatCount { get; set; }
     public string Status { get; set; } = string.Empty;
     public bool IsMonthly { get; set; }
+
+    /// <summary>Geriye dönük uyumluluk için korunur; <c>State != NotComing</c> ile aynıdır.</summary>
     public bool IsComing { get; set; }
+
+    /// <summary>
+    /// Sorgulanan gün için etkin durum. Gidiş seferlerinde yalnızca Confirmed/NotComing
+    /// üretilir; Planned yalnızca dönüş şablonundan gelip henüz onaylanmamış yolcular içindir.
+    /// </summary>
+    public ReturnAttendanceState State { get; set; }
 }
 
 public class StopDetailDto

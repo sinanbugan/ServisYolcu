@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
+using ServisYolcu.API.BackgroundServices;
 using ServisYolcu.API.Middleware;
 using ServisYolcu.Core.Interfaces;
+using ServisYolcu.Core.Options;
 using ServisYolcu.Infrastructure.Data;
 using ServisYolcu.Infrastructure.Services;
 
@@ -15,7 +17,11 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"),
         b => b.MigrationsAssembly("ServisYolcu.Infrastructure")));
 
+// Options
+builder.Services.Configure<ReturnPlanOptions>(builder.Configuration.GetSection(ReturnPlanOptions.SectionName));
+
 // Services
+builder.Services.AddSingleton<IAppClock, AppClock>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IUserService, UserService>();
@@ -23,7 +29,11 @@ builder.Services.AddScoped<ITripService, TripService>();
 builder.Services.AddScoped<IRouteService, RouteService>();
 builder.Services.AddScoped<IMenuService, MenuService>();
 builder.Services.AddScoped<IMonthlyReservationService, MonthlyReservationService>();
+builder.Services.AddScoped<IReturnPlanService, ReturnPlanService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+
+// Dönüş kararı vermemiş yolculara yerel cutoff saatinde tek hatırlatma gönderir.
+builder.Services.AddHostedService<ReturnReminderService>();
 
 // JWT Authentication
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");

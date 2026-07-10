@@ -3,22 +3,29 @@ using FirebaseAdmin.Messaging;
 using Google.Apis.Auth.OAuth2;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Npgsql;
 using ServisYolcu.Core.DTOs.Notification;
 using ServisYolcu.Core.Entities;
+using ServisYolcu.Core.Enums;
 using ServisYolcu.Core.Interfaces;
+using ServisYolcu.Core.Utilities;
 using ServisYolcu.Infrastructure.Data;
 
 namespace ServisYolcu.Infrastructure.Services;
 
 public class NotificationService : INotificationService
 {
+    private const string ReturnReminderType = "return_reminder";
+
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
+    private readonly IAppClock _clock;
 
-    public NotificationService(AppDbContext context, IConfiguration configuration)
+    public NotificationService(AppDbContext context, IConfiguration configuration, IAppClock clock)
     {
         _context = context;
         _configuration = configuration;
+        _clock = clock;
         EnsureFirebaseInitialized();
     }
 
@@ -98,9 +105,118 @@ public class NotificationService : INotificationService
             };
         }
 
-        var queryDate = DateTime.UtcNow.Date;
+        // Gün, sunucunun UTC tarihi değil yolcunun yerel takvim günü olmalı.
+        var queryDate = _clock.LocalToday;
+
+        var notifiedPassengerIds = trip.Direction == TripDirection.Return
+            ? await GetReturnPassengerIdsAsync(tripId, queryDate, s => s != ReturnAttendanceState.NotComing, cancellationToken)
+            : await GetOutboundPassengerIdsAsync(tripId, queryDate, cancellationToken);
+
+        var tokens = await _context.DeviceTokens
+            .Where(t => t.IsActive && notifiedPassengerIds.Contains(t.UserId))
+            .Select(t => t.Token)
+            .ToListAsync(cancellationToken);
+
+        return await SendToTokensAsync(tokens, title, body, data, "trip_started", null, null, cancellationToken, tripId);
+    }
+
+    public async Task<NotificationDeliveryResultDto> SendReturnReminderAsync(int tripId, DateOnly date, CancellationToken cancellationToken = default)
+    {
+        var trip = await _context.Trips
+            .Include(t => t.Route)
+            .FirstOrDefaultAsync(t => t.Id == tripId, cancellationToken);
+
+        if (trip is null || trip.Direction != TripDirection.Return)
+        {
+            return new NotificationDeliveryResultDto
+            {
+                Success = false,
+                Message = "Return trip not found.",
+                SentCount = 0,
+                FailedCount = 0
+            };
+        }
+
+        var undecided = await GetReturnPassengerIdsAsync(
+            tripId, date, s => s == ReturnAttendanceState.Planned, cancellationToken);
+
+        if (undecided.Count == 0)
+        {
+            return new NotificationDeliveryResultDto
+            {
+                Success = true,
+                Message = "No undecided passengers.",
+                SentCount = 0,
+                FailedCount = 0
+            };
+        }
+
+        var title = "Dönüş servisi";
+        var body = $"Bugün {trip.Route.Name} ile dönüyor musunuz? Lütfen onaylayın.";
+
+        // Göndermeden ÖNCE kaydı yaz. (Type, TripId, ReferenceDate) üzerindeki filtreli unique
+        // index sayesinde aynı sefer/gün için ikinci bir çağrı — ister sonraki tur, ister başka
+        // bir sunucu örneği olsun — buraya çarpar ve bildirim tekrar gönderilmez.
+        var log = new NotificationLog
+        {
+            Title = title,
+            Body = body,
+            Type = ReturnReminderType,
+            TripId = tripId,
+            ReferenceDate = date,
+            SentCount = 0,
+            FailedCount = 0,
+        };
+
+        _context.NotificationLogs.Add(log);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            _context.Entry(log).State = EntityState.Detached;
+            return new NotificationDeliveryResultDto
+            {
+                Success = true,
+                Message = "Reminder already sent for this trip and day.",
+                SentCount = 0,
+                FailedCount = 0
+            };
+        }
+
+        var tokens = await _context.DeviceTokens
+            .Where(t => t.IsActive && undecided.Contains(t.UserId))
+            .Select(t => t.Token)
+            .ToListAsync(cancellationToken);
+
+        var data = new Dictionary<string, string>
+        {
+            ["type"] = ReturnReminderType,
+            ["tripId"] = tripId.ToString(),
+            ["date"] = date.ToString("yyyy-MM-dd"),
+        };
+
+        var result = await DispatchAsync(tokens, title, body, data, cancellationToken);
+
+        log.SentCount = result.SentCount;
+        log.FailedCount = result.FailedCount;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        result.LogId = log.Id;
+        return result;
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
+
+    private async Task<HashSet<int>> GetOutboundPassengerIdsAsync(int tripId, DateOnly date, CancellationToken cancellationToken)
+    {
         var monthlyReservations = await _context.MonthlyReservations
-            .Where(m => m.TripId == tripId && m.Year == queryDate.Year && m.Month == queryDate.Month)
+            .Where(m => m.TripId == tripId
+                        && m.Direction == TripDirection.Outbound
+                        && m.Year == date.Year
+                        && m.Month == date.Month)
             .ToListAsync(cancellationToken);
 
         var monthlyByPassenger = monthlyReservations
@@ -111,33 +227,20 @@ public class NotificationService : INotificationService
             .Where(r => r.TripId == tripId && r.Status == ReservationStatus.Confirmed)
             .ToListAsync(cancellationToken);
 
-        var notifiedPassengerIds = new HashSet<int>();
+        var passengerIds = regularReservations.Select(r => r.PassengerId)
+            .Concat(monthlyReservations.Select(m => m.PassengerId))
+            .Distinct();
 
-        foreach (var reservation in regularReservations)
-        {
-            if (ShouldNotifyPassengerForTrip(reservation.PassengerId, monthlyByPassenger, queryDate.Day))
-            {
-                notifiedPassengerIds.Add(reservation.PassengerId);
-            }
-        }
+        return passengerIds
+            .Where(id => ShouldNotifyPassengerForTrip(id, monthlyByPassenger, date.Day))
+            .ToHashSet();
+    }
 
-        foreach (var monthlyReservation in monthlyReservations)
-        {
-            if (notifiedPassengerIds.Contains(monthlyReservation.PassengerId))
-                continue;
-
-            if (ShouldNotifyPassengerForTrip(monthlyReservation.PassengerId, monthlyByPassenger, queryDate.Day))
-            {
-                notifiedPassengerIds.Add(monthlyReservation.PassengerId);
-            }
-        }
-
-        var tokens = await _context.DeviceTokens
-            .Where(t => t.IsActive && notifiedPassengerIds.Contains(t.UserId))
-            .Select(t => t.Token)
-            .ToListAsync(cancellationToken);
-
-        return await SendToTokensAsync(tokens, title, body, data, "trip_started", null, null, cancellationToken);
+    private async Task<HashSet<int>> GetReturnPassengerIdsAsync(
+        int tripId, DateOnly date, Func<ReturnAttendanceState, bool> predicate, CancellationToken cancellationToken)
+    {
+        var roster = await ReturnRoster.BuildAsync(_context, tripId, date, cancellationToken);
+        return roster.Where(r => predicate(r.State)).Select(r => r.PassengerId).ToHashSet();
     }
 
     private static bool ShouldNotifyPassengerForTrip(int passengerId, IReadOnlyDictionary<int, MonthlyReservation> monthlyByPassenger, int day)
@@ -145,35 +248,41 @@ public class NotificationService : INotificationService
         if (!monthlyByPassenger.TryGetValue(passengerId, out var monthlyReservation))
             return true;
 
-        return !ParseDaysOff(monthlyReservation.DaysOff).Contains(day);
+        return !DayList.Parse(monthlyReservation.DaysOff).Contains(day);
     }
 
-    private static List<int> ParseDaysOff(string csv)
+    private async Task<NotificationDeliveryResultDto> SendToTokensAsync(IEnumerable<string> tokens, string title, string body, Dictionary<string, string>? data, string type, int? userId, int? companyId, CancellationToken cancellationToken, int? tripId = null)
     {
-        if (string.IsNullOrWhiteSpace(csv)) return new List<int>();
-        return csv.Split(',', StringSplitOptions.RemoveEmptyEntries)
-            .Select(s => int.TryParse(s, out var value) ? value : 0)
-            .Where(v => v > 0)
-            .ToList();
+        var result = await DispatchAsync(tokens, title, body, data, cancellationToken);
+
+        var log = new NotificationLog
+        {
+            Title = title,
+            Body = body,
+            Type = type,
+            UserId = userId,
+            CompanyId = companyId,
+            TripId = tripId,
+            SentCount = result.SentCount,
+            FailedCount = result.FailedCount
+        };
+
+        await _context.NotificationLogs.AddAsync(log, cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        result.LogId = log.Id;
+        return result;
     }
 
-    private async Task<NotificationDeliveryResultDto> SendToTokensAsync(IEnumerable<string> tokens, string title, string body, Dictionary<string, string>? data, string type, int? userId, int? companyId, CancellationToken cancellationToken)
+    /// <summary>
+    /// FCM'e gönderir, ölü token'ları pasifleştirir ve sonucu döner. NotificationLog YAZMAZ —
+    /// dönüş hatırlatması kaydı göndermeden önce yazmak zorunda olduğu için ayrıldı.
+    /// </summary>
+    private async Task<NotificationDeliveryResultDto> DispatchAsync(IEnumerable<string> tokens, string title, string body, Dictionary<string, string>? data, CancellationToken cancellationToken)
     {
         var tokenList = tokens.Where(t => !string.IsNullOrWhiteSpace(t)).Distinct().ToList();
         if (tokenList.Count == 0)
         {
-            await _context.NotificationLogs.AddAsync(new NotificationLog
-            {
-                Title = title,
-                Body = body,
-                Type = type,
-                UserId = userId,
-                CompanyId = companyId,
-                SentCount = 0,
-                FailedCount = 0
-            }, cancellationToken);
-            await _context.SaveChangesAsync(cancellationToken);
-
             return new NotificationDeliveryResultDto
             {
                 Success = true,
@@ -229,21 +338,6 @@ public class NotificationService : INotificationService
             }
         }
 
-        // Persist a NotificationLog (summary stored in columns; full tokenResults are kept only in logs if needed)
-        var log = new NotificationLog
-        {
-            Title = title,
-            Body = body,
-            Type = type,
-            UserId = userId,
-            CompanyId = companyId,
-            SentCount = response.SuccessCount,
-            FailedCount = response.FailureCount
-        };
-
-        await _context.NotificationLogs.AddAsync(log, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
-
         // Build error summary (group by common known error keywords or raw message)
         var errorSummary = tokenResults
             .Where(tr => !tr.Success)
@@ -264,7 +358,6 @@ public class NotificationService : INotificationService
             SentCount = response.SuccessCount,
             FailedCount = response.FailureCount,
             ErrorSummary = errorSummary,
-            LogId = log.Id,
             TokenResults = new List<NotificationTokenResultDto>()
         };
     }

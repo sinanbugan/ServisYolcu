@@ -1,3 +1,5 @@
+using ServisYolcu.Core.Enums;
+
 namespace ServisYolcu.Core.DTOs.Reservation;
 
 public class MonthlyReservationDto
@@ -9,4 +11,10 @@ public class MonthlyReservationDto
     public string RouteName { get; set; } = string.Empty;
     public List<int> DaysOff { get; set; } = new();
     public DateTime CreatedAt { get; set; }
+
+    public TripDirection Direction { get; set; }
+    public DateTime DepartureTime { get; set; }
+
+    public int? BoardingStopId { get; set; }
+    public string? BoardingStopName { get; set; }
 }

@@ -19,6 +19,7 @@ public class AppDbContext : DbContext
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
     public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
+    public DbSet<ReturnDayChoice> ReturnDayChoices => Set<ReturnDayChoice>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -55,6 +56,8 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Trip>(entity =>
         {
+            entity.HasIndex(t => t.Direction);
+
             entity.HasOne(t => t.Route)
                   .WithMany(r => r.Trips)
                   .HasForeignKey(t => t.RouteId)
@@ -138,6 +141,15 @@ public class AppDbContext : DbContext
         {
             entity.Property(m => m.DaysOff).HasMaxLength(200);
 
+            // ReturnAttendanceResolver tek bir dönüş şablonu bekler; ikinci bir satır
+            // o ayın çözümlemesini belirsizleştirir. Kısıt yalnızca Direction = Return
+            // satırlarına uygulanır — mevcut gidiş satırlarında olası kopyalar migration'ı
+            // düşürmesin diye (gidiş tekilliği hâlâ uygulama katmanında korunuyor).
+            entity.HasIndex(m => new { m.PassengerId, m.Year, m.Month })
+                  .IsUnique()
+                  .HasFilter("\"Direction\" = 1")
+                  .HasDatabaseName("IX_MonthlyReservations_ReturnTemplate_Unique");
+
             entity.HasOne(m => m.Trip)
                   .WithMany()
                   .HasForeignKey(m => m.TripId)
@@ -147,6 +159,35 @@ public class AppDbContext : DbContext
                   .WithMany()
                   .HasForeignKey(m => m.PassengerId)
                   .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(m => m.BoardingStop)
+                  .WithMany()
+                  .HasForeignKey(m => m.BoardingStopId)
+                  .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ReturnDayChoice>(entity =>
+        {
+            // Bir yolcunun bir gün için tek kararı olur; upsert bu kısıta dayanır.
+            entity.HasIndex(c => new { c.PassengerId, c.Date }).IsUnique();
+
+            // Sürücü manifestosu (TripId, Date) üzerinden okur.
+            entity.HasIndex(c => new { c.TripId, c.Date });
+
+            entity.HasOne(c => c.Passenger)
+                  .WithMany()
+                  .HasForeignKey(c => c.PassengerId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(c => c.Trip)
+                  .WithMany()
+                  .HasForeignKey(c => c.TripId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.BoardingStop)
+                  .WithMany()
+                  .HasForeignKey(c => c.BoardingStopId)
+                  .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<DeviceToken>(entity =>
@@ -166,6 +207,15 @@ public class AppDbContext : DbContext
             entity.Property(nl => nl.Title).IsRequired().HasMaxLength(200);
             entity.Property(nl => nl.Body).IsRequired().HasMaxLength(500);
             entity.Property(nl => nl.Type).IsRequired().HasMaxLength(100);
+
+            // Dönüş hatırlatması sefer+gün başına tek kez gider. Uygulama içi "önce sorgula,
+            // sonra gönder" kontrolü iki sunucu örneği arasında yarışır; asıl garantiyi bu
+            // index verir. ReferenceDate yalnızca hatırlatmalarda dolduğu için trip_started
+            // gibi tekrarlanabilir bildirimler kısıttan etkilenmez.
+            entity.HasIndex(nl => new { nl.Type, nl.TripId, nl.ReferenceDate })
+                  .IsUnique()
+                  .HasFilter("\"ReferenceDate\" IS NOT NULL")
+                  .HasDatabaseName("IX_NotificationLogs_ReturnReminder_Unique");
         });
     }
 }
