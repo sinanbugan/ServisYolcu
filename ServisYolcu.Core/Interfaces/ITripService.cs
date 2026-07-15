@@ -19,4 +19,7 @@ public interface ITripService
     Task<ReservationDto> CreateReservationAsync(int passengerId, CreateReservationDto dto);
     Task<IEnumerable<ReservationDto>> GetPassengerReservationsAsync(int passengerId);
     Task CancelReservationAsync(int passengerId, int reservationId);
+    Task<OutboundDayChoiceDto?> GetOutboundDayChoiceAsync(int passengerId, DateOnly date);
+    Task<OutboundDayChoiceDto> UpsertOutboundDayChoiceAsync(int passengerId, UpsertOutboundDayChoiceDto dto);
+    Task ClearOutboundDayChoiceAsync(int passengerId, DateOnly date);
 }

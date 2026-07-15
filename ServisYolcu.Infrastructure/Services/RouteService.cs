@@ -36,26 +36,59 @@ public class RouteService : IRouteService
 
     public async Task<RouteDto> CreateRouteAsync(int companyId, CreateRouteDto dto)
     {
+        var orderedStops = dto.Stops
+            .OrderBy(s => s.Order)
+            .ToList();
+
         var route = new Route
         {
             Name = dto.Name,
             StartPoint = dto.StartPoint,
             EndPoint = dto.EndPoint,
             PricePerSeat = dto.PricePerSeat,
+            IsReverse = false,
             CompanyId = companyId,
-            Stops = dto.Stops.Select(s => new Stop
+            Stops = orderedStops.Select((s, index) => new Stop
             {
                 Name = s.Name,
                 Address = s.Address,
                 Latitude = s.Latitude,
                 Longitude = s.Longitude,
-                Order = s.Order,
+                Order = index + 1,
                 CompanyId = companyId
             }).ToList()
         };
 
-        _context.Routes.Add(route);
+        var returnRoute = new Route
+        {
+            Name = $"{dto.Name} - Dönüş",
+            StartPoint = dto.EndPoint,
+            EndPoint = dto.StartPoint,
+            PricePerSeat = dto.PricePerSeat,
+            IsReverse = true,
+            CompanyId = companyId,
+            Stops = orderedStops
+                .AsEnumerable()
+                .Reverse()
+                .Select((s, index) => new Stop
+                {
+                    Name = s.Name,
+                    Address = s.Address,
+                    Latitude = s.Latitude,
+                    Longitude = s.Longitude,
+                    Order = index + 1,
+                    CompanyId = companyId
+                })
+                .ToList()
+        };
+
+        _context.Routes.AddRange(route, returnRoute);
         await _context.SaveChangesAsync();
+
+        route.ReverseRouteId = returnRoute.Id;
+        returnRoute.ReverseRouteId = route.Id;
+        await _context.SaveChangesAsync();
+
         return MapToDto(route);
     }
 
@@ -111,6 +144,8 @@ public class RouteService : IRouteService
         StartPoint = route.StartPoint,
         EndPoint = route.EndPoint,
         PricePerSeat = route.PricePerSeat,
+        ReverseRouteId = route.ReverseRouteId,
+        IsReverse = route.IsReverse,
         IsActive = route.IsActive,
         Stops = route.Stops.Select(MapStopToDto).ToList()
     };

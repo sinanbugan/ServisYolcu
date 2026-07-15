@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using ServisYolcu.Infrastructure.Data;
@@ -11,9 +12,11 @@ using ServisYolcu.Infrastructure.Data;
 namespace ServisYolcu.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260713181432_AddReverseRouteLinking")]
+    partial class AddReverseRouteLinking
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -264,44 +267,6 @@ namespace ServisYolcu.Infrastructure.Migrations
                         .HasFilter("\"ReferenceDate\" IS NOT NULL");
 
                     b.ToTable("NotificationLogs");
-                });
-
-            modelBuilder.Entity("ServisYolcu.Core.Entities.OutboundDayChoice", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int?>("BoardingStopId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateOnly>("Date")
-                        .HasColumnType("date");
-
-                    b.Property<int>("PassengerId")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("TripId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BoardingStopId");
-
-                    b.HasIndex("PassengerId", "Date")
-                        .IsUnique();
-
-                    b.HasIndex("TripId", "Date");
-
-                    b.ToTable("OutboundDayChoices");
                 });
 
             modelBuilder.Entity("ServisYolcu.Core.Entities.RefreshToken", b =>
@@ -653,32 +618,6 @@ namespace ServisYolcu.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("PassengerId")
                         .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("ServisYolcu.Core.Entities.Trip", "Trip")
-                        .WithMany()
-                        .HasForeignKey("TripId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("BoardingStop");
-
-                    b.Navigation("Passenger");
-
-                    b.Navigation("Trip");
-                });
-
-            modelBuilder.Entity("ServisYolcu.Core.Entities.OutboundDayChoice", b =>
-                {
-                    b.HasOne("ServisYolcu.Core.Entities.Stop", "BoardingStop")
-                        .WithMany()
-                        .HasForeignKey("BoardingStopId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("ServisYolcu.Core.Entities.User", "Passenger")
-                        .WithMany()
-                        .HasForeignKey("PassengerId")
-                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.HasOne("ServisYolcu.Core.Entities.Trip", "Trip")

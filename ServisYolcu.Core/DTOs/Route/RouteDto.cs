@@ -19,6 +19,8 @@ public class RouteDto
     public string StartPoint { get; set; } = string.Empty;
     public string EndPoint { get; set; } = string.Empty;
     public decimal PricePerSeat { get; set; }
+    public int? ReverseRouteId { get; set; }
+    public bool IsReverse { get; set; }
     public bool IsActive { get; set; }
     public List<StopDto> Stops { get; set; } = new();
 }

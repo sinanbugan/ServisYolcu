@@ -12,7 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<Route> Routes => Set<Route>();
     public DbSet<Trip> Trips => Set<Trip>();
     public DbSet<Reservation> Reservations => Set<Reservation>();
-      public DbSet<MonthlyReservation> MonthlyReservations => Set<MonthlyReservation>();
+            public DbSet<MonthlyReservation> MonthlyReservations => Set<MonthlyReservation>();
     public DbSet<Menu> Menus => Set<Menu>();
     public DbSet<MenuRole> MenuRoles => Set<MenuRole>();
     public DbSet<Stop> Stops => Set<Stop>();
@@ -20,6 +20,7 @@ public class AppDbContext : DbContext
     public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
     public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
     public DbSet<ReturnDayChoice> ReturnDayChoices => Set<ReturnDayChoice>();
+            public DbSet<OutboundDayChoice> OutboundDayChoices => Set<OutboundDayChoice>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -90,6 +91,12 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Route>(entity =>
         {
             entity.Property(r => r.PricePerSeat).HasColumnType("decimal(10,2)");
+            entity.HasIndex(r => r.ReverseRouteId);
+
+            entity.HasOne<Route>()
+                  .WithMany()
+                  .HasForeignKey(r => r.ReverseRouteId)
+                  .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(r => r.Company)
                   .WithMany(c => c.Routes)
@@ -169,6 +176,30 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<ReturnDayChoice>(entity =>
         {
             // Bir yolcunun bir gün için tek kararı olur; upsert bu kısıta dayanır.
+            entity.HasIndex(c => new { c.PassengerId, c.Date }).IsUnique();
+
+            // Sürücü manifestosu (TripId, Date) üzerinden okur.
+            entity.HasIndex(c => new { c.TripId, c.Date });
+
+            entity.HasOne(c => c.Passenger)
+                  .WithMany()
+                  .HasForeignKey(c => c.PassengerId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(c => c.Trip)
+                  .WithMany()
+                  .HasForeignKey(c => c.TripId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(c => c.BoardingStop)
+                  .WithMany()
+                  .HasForeignKey(c => c.BoardingStopId)
+                  .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<OutboundDayChoice>(entity =>
+        {
+            // Bir yolcunun bir gün için tek bir gidiş override kaydı olur.
             entity.HasIndex(c => new { c.PassengerId, c.Date }).IsUnique();
 
             // Sürücü manifestosu (TripId, Date) üzerinden okur.

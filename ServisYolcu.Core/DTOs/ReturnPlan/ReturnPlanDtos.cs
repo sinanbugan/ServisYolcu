@@ -55,8 +55,8 @@ public class UpsertReturnDayDto
     public ReturnDecision Decision { get; set; }
 
     /// <summary>Decision = Coming ise zorunlu; bir dönüş seferini göstermelidir.</summary>
-    public int? TripId { get; set; }
+    public int TripId { get; set; }
 
     /// <summary>Verilirse seferin rotasına ait aktif bir durak olmalıdır.</summary>
-    public int? BoardingStopId { get; set; }
+    public int BoardingStopId { get; set; }
 }

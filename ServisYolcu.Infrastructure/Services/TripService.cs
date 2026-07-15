@@ -80,6 +80,15 @@ public class TripService : ITripService
 
     private async Task<List<RosterEntry>> BuildOutboundRosterAsync(Trip trip, DateOnly date)
     {
+        var dayChoices = await _context.OutboundDayChoices
+            .Include(c => c.Passenger)
+            .Where(c => c.Date == date)
+            .ToListAsync();
+
+        var choiceByPassenger = dayChoices
+            .GroupBy(c => c.PassengerId)
+            .ToDictionary(g => g.Key, g => g.First());
+
         var monthly = await _context.MonthlyReservations
             .Include(m => m.Passenger)
             .Where(m => m.TripId == trip.Id
@@ -96,7 +105,17 @@ public class TripService : ITripService
 
         foreach (var r in trip.Reservations)
         {
+            choiceByPassenger.TryGetValue(r.PassengerId, out var overrideChoice);
+
+            if (overrideChoice is not null && overrideChoice.TripId != trip.Id)
+                continue;
+
             var coming = IsOutboundPassengerComing(r, monthlyByPassenger, date.Day);
+            var isOverrideForThisTrip = overrideChoice is not null && overrideChoice.TripId == trip.Id;
+
+            if (isOverrideForThisTrip)
+                coming = true;
+
             entries.Add(new RosterEntry(
                 new PassengerInfoDto
                 {
@@ -105,20 +124,34 @@ public class TripService : ITripService
                     FullName = $"{r.Passenger.FirstName} {r.Passenger.LastName}",
                     PhoneNumber = r.Passenger.PhoneNumber,
                     SeatCount = r.SeatCount,
-                    Status = r.Status.ToString(),
                     IsMonthly = false,
                     IsComing = coming,
                     State = coming ? ReturnAttendanceState.Confirmed : ReturnAttendanceState.NotComing,
+                    Status = isOverrideForThisTrip
+                        ? "Daily-Override"
+                        : r.Status.ToString(),
                 },
-                r.BoardingStopId));
+                isOverrideForThisTrip
+                    ? overrideChoice!.BoardingStopId ?? r.BoardingStopId
+                    : r.BoardingStopId));
         }
 
         // Rezervasyonu olan yolcuları iki kez listelememek için hariç tut.
-        var existingPassengerIds = trip.Reservations.Select(r => r.PassengerId).ToHashSet();
+        var existingPassengerIds = entries.Select(e => e.Passenger.PassengerId).ToHashSet();
 
         foreach (var m in monthly.Where(m => !existingPassengerIds.Contains(m.PassengerId)))
         {
+            choiceByPassenger.TryGetValue(m.PassengerId, out var overrideChoice);
+
+            if (overrideChoice is not null && overrideChoice.TripId != trip.Id)
+                continue;
+
             var coming = !DayList.Parse(m.DaysOff).Contains(date.Day);
+            var isOverrideForThisTrip = overrideChoice is not null && overrideChoice.TripId == trip.Id;
+
+            if (isOverrideForThisTrip)
+                coming = true;
+
             entries.Add(new RosterEntry(
                 new PassengerInfoDto
                 {
@@ -130,9 +163,38 @@ public class TripService : ITripService
                     IsMonthly = true,
                     IsComing = coming,
                     State = coming ? ReturnAttendanceState.Confirmed : ReturnAttendanceState.NotComing,
-                    Status = coming ? "Monthly" : "Monthly-Off",
+                    Status = isOverrideForThisTrip
+                        ? "Daily-Override"
+                        : (coming ? "Monthly" : "Monthly-Off"),
                 },
-                m.BoardingStopId));
+                isOverrideForThisTrip
+                    ? overrideChoice!.BoardingStopId ?? m.BoardingStopId
+                    : m.BoardingStopId));
+        }
+
+        existingPassengerIds = entries.Select(e => e.Passenger.PassengerId).ToHashSet();
+
+        var incomingOverrides = dayChoices
+            .Where(c => c.TripId == trip.Id && !existingPassengerIds.Contains(c.PassengerId));
+
+        foreach (var incoming in incomingOverrides)
+        {
+            entries.Add(new RosterEntry(
+                new PassengerInfoDto
+                {
+                    ReservationId = 0,
+                    PassengerId = incoming.PassengerId,
+                    FullName = incoming.Passenger is null
+                        ? string.Empty
+                        : $"{incoming.Passenger.FirstName} {incoming.Passenger.LastName}",
+                    PhoneNumber = incoming.Passenger?.PhoneNumber ?? string.Empty,
+                    SeatCount = 1,
+                    IsMonthly = false,
+                    IsComing = true,
+                    State = ReturnAttendanceState.Confirmed,
+                    Status = "Daily-Override",
+                },
+                incoming.BoardingStopId));
         }
 
         return entries;
@@ -181,12 +243,11 @@ public class TripService : ITripService
             .Select(e => e.Passenger)
             .ToList();
 
-        // Gidişte saklanan AvailableSeats rezervasyonlarla güncelleniyor; aylık aboneler
-        // yalnızca okuma anında düşülüyor. Dönüşte Reservation yok, bu yüzden müsaitlik
-        // tamamen o günün roster'ından hesaplanır.
-        var availableSeats = trip.Direction == TripDirection.Return
-            ? trip.TotalSeats - roster.Count(e => e.Passenger.IsComing)
-            : trip.AvailableSeats - roster.Count(e => e.Passenger.IsMonthly && e.Passenger.IsComing);
+        var occupiedSeats = roster
+            .Where(e => e.Passenger.IsComing)
+            .Sum(e => Math.Max(1, e.Passenger.SeatCount));
+
+        var availableSeats = trip.TotalSeats - occupiedSeats;
 
         return new TripDetailDto
         {
@@ -233,7 +294,8 @@ public class TripService : ITripService
             TotalSeats = dto.TotalSeats,
             AvailableSeats = dto.TotalSeats,
             VehiclePlate = dto.VehiclePlate,
-            Direction = dto.Direction,
+            // Dönüş rotasından üretilen seferlerin yönü her zaman Return olmalı.
+            Direction = route.IsReverse ? TripDirection.Return : dto.Direction,
         };
 
         _context.Trips.Add(trip);
@@ -266,10 +328,6 @@ public class TripService : ITripService
                 .ThenInclude(r => r.Stops)
             .FirstOrDefaultAsync(t => t.Id == dto.TripId && t.IsActive)
             ?? throw new KeyNotFoundException("Sefer bulunamadı.");
-
-        // Dönüş koltukları günlük kararlarla (ReturnDayChoice) tutulur; buradan rezerve edilemez.
-        if (trip.Direction != TripDirection.Outbound)
-            throw new InvalidOperationException("Dönüş seferi için rezervasyon oluşturulamaz. Dönüş planınızı kullanın.");
 
         var stopBelongsToRoute = trip.Route.Stops.Any(s => s.Id == dto.BoardingStopId && s.IsActive);
         if (!stopBelongsToRoute)
@@ -334,6 +392,109 @@ public class TripService : ITripService
 
         reservation.Status = ReservationStatus.Cancelled;
         reservation.Trip.AvailableSeats += reservation.SeatCount;
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task<OutboundDayChoiceDto?> GetOutboundDayChoiceAsync(int passengerId, DateOnly date)
+    {
+        var choice = await _context.OutboundDayChoices
+            .Include(c => c.Trip).ThenInclude(t => t.Route)
+            .Include(c => c.BoardingStop)
+            .FirstOrDefaultAsync(c => c.PassengerId == passengerId && c.Date == date);
+
+        if (choice is null)
+            return null;
+
+        return new OutboundDayChoiceDto
+        {
+            Date = choice.Date,
+            TripId = choice.TripId,
+            RouteName = choice.Trip.Route.Name,
+            DepartureTime = choice.Trip.DepartureTime,
+            BoardingStopId = choice.BoardingStopId,
+            BoardingStopName = choice.BoardingStop?.Name,
+            IsEditable = date >= _clock.LocalToday,
+        };
+    }
+
+    public async Task<OutboundDayChoiceDto> UpsertOutboundDayChoiceAsync(int passengerId, UpsertOutboundDayChoiceDto dto)
+    {
+        if (dto.Date < _clock.LocalToday)
+            throw new InvalidOperationException("Geçmiş bir gün için günlük rota seçimi değiştirilemez.");
+
+        var passenger = await _context.Users.FirstOrDefaultAsync(u => u.Id == passengerId)
+            ?? throw new KeyNotFoundException("Yolcu bulunamadı.");
+
+        var trip = await _context.Trips
+            .Include(t => t.Route)
+                .ThenInclude(r => r.Stops)
+            .FirstOrDefaultAsync(t => t.Id == dto.TripId && t.IsActive)
+            ?? throw new KeyNotFoundException("Sefer bulunamadı.");
+
+        if (trip.Direction != TripDirection.Outbound)
+            throw new InvalidOperationException("Günlük rota seçimi için bir gidiş seferi seçmelisiniz.");
+
+        if (trip.Route.CompanyId != passenger.CompanyId)
+            throw new InvalidOperationException("Bu sefer şirketinize ait değil.");
+
+        if (dto.BoardingStopId is > 0)
+        {
+            var stopBelongsToRoute = trip.Route.Stops.Any(s => s.Id == dto.BoardingStopId.Value && s.IsActive);
+            if (!stopBelongsToRoute)
+                throw new InvalidOperationException("Belirtilen durak bu sefere ait değil.");
+        }
+
+        var choice = await _context.OutboundDayChoices
+            .FirstOrDefaultAsync(c => c.PassengerId == passengerId && c.Date == dto.Date);
+
+        if (choice is null)
+        {
+            choice = new OutboundDayChoice
+            {
+                PassengerId = passengerId,
+                Date = dto.Date,
+                TripId = trip.Id,
+                BoardingStopId = dto.BoardingStopId,
+            };
+            _context.OutboundDayChoices.Add(choice);
+        }
+        else
+        {
+            choice.TripId = trip.Id;
+            choice.BoardingStopId = dto.BoardingStopId;
+            choice.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync();
+
+        var stop = dto.BoardingStopId is > 0
+            ? trip.Route.Stops.FirstOrDefault(s => s.Id == dto.BoardingStopId.Value)
+            : null;
+
+        return new OutboundDayChoiceDto
+        {
+            Date = dto.Date,
+            TripId = trip.Id,
+            RouteName = trip.Route.Name,
+            DepartureTime = trip.DepartureTime,
+            BoardingStopId = dto.BoardingStopId,
+            BoardingStopName = stop?.Name,
+            IsEditable = true,
+        };
+    }
+
+    public async Task ClearOutboundDayChoiceAsync(int passengerId, DateOnly date)
+    {
+        if (date < _clock.LocalToday)
+            throw new InvalidOperationException("Geçmiş bir gün için günlük rota seçimi değiştirilemez.");
+
+        var choice = await _context.OutboundDayChoices
+            .FirstOrDefaultAsync(c => c.PassengerId == passengerId && c.Date == date);
+
+        if (choice is null)
+            return;
+
+        _context.OutboundDayChoices.Remove(choice);
         await _context.SaveChangesAsync();
     }
 

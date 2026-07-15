@@ -32,8 +32,17 @@ public class ReturnPlanController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>Bir gün için yazılmış günlük dönüş kararını döner; yoksa null.</summary>
+    [HttpGet("days/{date}")]
+    public async Task<ActionResult<ReturnDayDto?>> GetDay(DateOnly date, CancellationToken cancellationToken)
+    {
+        var passengerId = CurrentPassengerId();
+        var day = await _service.GetDayAsync(passengerId, date, cancellationToken);
+        return Ok(day);
+    }
+
     /// <summary>Bir gün için dönüş kararını yazar veya günceller.</summary>
-    [HttpPut("days/{date}")]
+    [HttpPost("days/{date}")]
     public async Task<ActionResult<ReturnDayDto>> UpsertDay(
         DateOnly date, [FromBody] UpsertReturnDayDto dto, CancellationToken cancellationToken)
     {
@@ -50,6 +59,5 @@ public class ReturnPlanController : ControllerBase
         await _service.ClearDayAsync(passengerId, date, cancellationToken);
         return NoContent();
     }
-
     private int CurrentPassengerId() => int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 }

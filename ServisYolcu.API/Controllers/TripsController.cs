@@ -107,4 +107,31 @@ public class TripsController : ControllerBase
         await _tripService.CancelReservationAsync(passengerId, reservationId);
         return NoContent();
     }
+
+    [HttpGet("outbound-day-choice")]
+    [Authorize(Roles = "Passenger,Admin")]
+    public async Task<ActionResult<OutboundDayChoiceDto?>> GetOutboundDayChoice([FromQuery] DateOnly date)
+    {
+        var passengerId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var choice = await _tripService.GetOutboundDayChoiceAsync(passengerId, date);
+        return Ok(choice);
+    }
+
+    [HttpPost("outbound-day-choice")]
+    [Authorize(Roles = "Passenger,Admin")]
+    public async Task<ActionResult<OutboundDayChoiceDto>> UpsertOutboundDayChoice([FromBody] UpsertOutboundDayChoiceDto dto)
+    {
+        var passengerId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var choice = await _tripService.UpsertOutboundDayChoiceAsync(passengerId, dto);
+        return Ok(choice);
+    }
+
+    [HttpDelete("outbound-day-choice")]
+    [Authorize(Roles = "Passenger,Admin")]
+    public async Task<IActionResult> ClearOutboundDayChoice([FromQuery] DateOnly date)
+    {
+        var passengerId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await _tripService.ClearOutboundDayChoiceAsync(passengerId, date);
+        return NoContent();
+    }
 }

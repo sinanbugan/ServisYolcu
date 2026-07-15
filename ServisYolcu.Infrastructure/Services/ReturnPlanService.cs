@@ -86,6 +86,19 @@ public class ReturnPlanService : IReturnPlanService
         };
     }
 
+    public async Task<ReturnDayDto?> GetDayAsync(int passengerId, DateOnly date, CancellationToken cancellationToken = default)
+    {
+        var choice = await _context.ReturnDayChoices
+            .Include(c => c.Trip).ThenInclude(t => t!.Route)
+            .Include(c => c.BoardingStop)
+            .FirstOrDefaultAsync(c => c.PassengerId == passengerId && c.Date == date, cancellationToken);
+
+        if (choice is null)
+            return null;
+
+        return BuildDayDto(date, choice, template: null, today: _clock.LocalToday);
+    }
+
     public async Task<ReturnDayDto> UpsertDayAsync(int passengerId, DateOnly date, UpsertReturnDayDto dto, CancellationToken cancellationToken = default)
     {
         var today = _clock.LocalToday;
@@ -100,12 +113,12 @@ public class ReturnPlanService : IReturnPlanService
 
         if (dto.Decision == ReturnDecision.Coming)
         {
-            if (dto.TripId is null or <= 0)
+            if (dto.TripId <= 0)
                 throw new InvalidOperationException("Dönüş için bir sefer seçilmelidir.");
 
             trip = await _context.Trips
                 .Include(t => t.Route).ThenInclude(r => r.Stops)
-                .FirstOrDefaultAsync(t => t.Id == dto.TripId.Value && t.IsActive, cancellationToken)
+                .FirstOrDefaultAsync(t => t.Id == dto.TripId && t.IsActive, cancellationToken)
                 ?? throw new KeyNotFoundException("Sefer bulunamadı.");
 
             if (trip.Direction != TripDirection.Return)
@@ -116,7 +129,7 @@ public class ReturnPlanService : IReturnPlanService
 
             if (dto.BoardingStopId is > 0)
             {
-                var stopBelongsToRoute = trip.Route.Stops.Any(s => s.Id == dto.BoardingStopId.Value && s.IsActive);
+                var stopBelongsToRoute = trip.Route.Stops.Any(s => s.Id == dto.BoardingStopId && s.IsActive);
                 if (!stopBelongsToRoute)
                     throw new InvalidOperationException("Belirtilen durak bu sefere ait değil.");
 
@@ -134,7 +147,7 @@ public class ReturnPlanService : IReturnPlanService
                 PassengerId = passengerId,
                 Date = date,
                 Decision = dto.Decision,
-                TripId = trip?.Id,
+                TripId = trip!.Id,
                 BoardingStopId = boardingStopId,
             };
             _context.ReturnDayChoices.Add(inserted);
