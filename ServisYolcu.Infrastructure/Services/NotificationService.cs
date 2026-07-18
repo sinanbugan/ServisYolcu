@@ -212,6 +212,14 @@ public class NotificationService : INotificationService
 
     private async Task<HashSet<int>> GetOutboundPassengerIdsAsync(int tripId, DateOnly date, CancellationToken cancellationToken)
     {
+        var dayChoices = await _context.OutboundDayChoices
+            .Where(c => c.Date == date)
+            .ToListAsync(cancellationToken);
+
+        var choiceByPassenger = dayChoices
+            .GroupBy(c => c.PassengerId)
+            .ToDictionary(g => g.Key, g => g.First());
+
         var monthlyReservations = await _context.MonthlyReservations
             .Where(m => m.TripId == tripId
                         && m.Direction == TripDirection.Outbound
@@ -227,13 +235,34 @@ public class NotificationService : INotificationService
             .Where(r => r.TripId == tripId && r.Status == ReservationStatus.Confirmed)
             .ToListAsync(cancellationToken);
 
-        var passengerIds = regularReservations.Select(r => r.PassengerId)
+        var candidatePassengerIds = regularReservations.Select(r => r.PassengerId)
             .Concat(monthlyReservations.Select(m => m.PassengerId))
+            .Concat(dayChoices.Where(c => c.TripId == tripId).Select(c => c.PassengerId))
             .Distinct();
 
-        return passengerIds
-            .Where(id => ShouldNotifyPassengerForTrip(id, monthlyByPassenger, date.Day))
-            .ToHashSet();
+        var notifiedPassengerIds = new HashSet<int>();
+        foreach (var passengerId in candidatePassengerIds)
+        {
+            if (choiceByPassenger.TryGetValue(passengerId, out var choice))
+            {
+                if (choice.TripId == tripId)
+                    notifiedPassengerIds.Add(passengerId);
+
+                continue;
+            }
+
+            if (monthlyByPassenger.TryGetValue(passengerId, out var monthlyReservation))
+            {
+                if (!DayList.Parse(monthlyReservation.DaysOff).Contains(date.Day))
+                    notifiedPassengerIds.Add(passengerId);
+
+                continue;
+            }
+
+            notifiedPassengerIds.Add(passengerId);
+        }
+
+        return notifiedPassengerIds;
     }
 
     private async Task<HashSet<int>> GetReturnPassengerIdsAsync(
@@ -241,14 +270,6 @@ public class NotificationService : INotificationService
     {
         var roster = await ReturnRoster.BuildAsync(_context, tripId, date, cancellationToken);
         return roster.Where(r => predicate(r.State)).Select(r => r.PassengerId).ToHashSet();
-    }
-
-    private static bool ShouldNotifyPassengerForTrip(int passengerId, IReadOnlyDictionary<int, MonthlyReservation> monthlyByPassenger, int day)
-    {
-        if (!monthlyByPassenger.TryGetValue(passengerId, out var monthlyReservation))
-            return true;
-
-        return !DayList.Parse(monthlyReservation.DaysOff).Contains(day);
     }
 
     private async Task<NotificationDeliveryResultDto> SendToTokensAsync(IEnumerable<string> tokens, string title, string body, Dictionary<string, string>? data, string type, int? userId, int? companyId, CancellationToken cancellationToken, int? tripId = null)
