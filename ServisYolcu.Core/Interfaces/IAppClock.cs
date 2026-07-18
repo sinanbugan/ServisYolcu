@@ -10,14 +10,9 @@ public interface IAppClock
 {
     TimeZoneInfo TimeZone { get; }
 
-    DateTimeOffset UtcNow { get; }
-
     /// <summary>Yapılandırılmış zaman diliminde şu an.</summary>
     DateTimeOffset LocalNow { get; }
 
     /// <summary>Yapılandırılmış zaman diliminde bugünün takvim günü.</summary>
     DateOnly LocalToday { get; }
-
-    /// <summary>Verilen UTC zaman damgasının yerel takvim günü.</summary>
-    DateOnly ToLocalDate(DateTime utc);
 }

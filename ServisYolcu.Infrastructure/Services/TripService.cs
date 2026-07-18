@@ -498,7 +498,7 @@ public class TripService : ITripService
         await _context.SaveChangesAsync();
     }
 
-    private static TripDto MapToDto(Trip t, int? effectiveAvailable = null) => new()
+    private static TripDto MapToDto(Trip t) => new()
     {
         Id = t.Id,
         RouteId = t.RouteId,
@@ -507,7 +507,7 @@ public class TripService : ITripService
         EndPoint = t.Route.EndPoint,
         DepartureTime = t.DepartureTime,
         TotalSeats = t.TotalSeats,
-        AvailableSeats = effectiveAvailable ?? t.AvailableSeats,
+        AvailableSeats = t.AvailableSeats,
         VehiclePlate = t.VehiclePlate,
         DriverId = t.DriverId,
         DriverName = $"{t.Driver.FirstName} {t.Driver.LastName}",

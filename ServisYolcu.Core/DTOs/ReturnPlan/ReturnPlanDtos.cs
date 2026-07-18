@@ -3,20 +3,6 @@ using ServisYolcu.Core.Enums;
 
 namespace ServisYolcu.Core.DTOs.ReturnPlan;
 
-/// <summary>Yolcunun bir aya ait dönüş şablonu (Direction = Return olan MonthlyReservation).</summary>
-public class ReturnTemplateDto
-{
-    public int Id { get; set; }
-    public int TripId { get; set; }
-    public string RouteName { get; set; } = string.Empty;
-    public string StartPoint { get; set; } = string.Empty;
-    public string EndPoint { get; set; } = string.Empty;
-    public DateTime DepartureTime { get; set; }
-    public List<int> DaysOff { get; set; } = new();
-    public int? BoardingStopId { get; set; }
-    public string? BoardingStopName { get; set; }
-}
-
 /// <summary>Bir takvim günü için hesaplanmış etkin dönüş durumu.</summary>
 public class ReturnDayDto
 {
@@ -34,19 +20,6 @@ public class ReturnDayDto
     public DateTime? DepartureTime { get; set; }
     public int? BoardingStopId { get; set; }
     public string? BoardingStopName { get; set; }
-}
-
-/// <summary>Dönüş sekmesinin tek çağrıda ihtiyaç duyduğu her şey.</summary>
-public class ReturnMonthDto
-{
-    public int Year { get; set; }
-    public int Month { get; set; }
-
-    /// <summary>Yolcunun bu ay için tanımlı şablonu; yoksa null.</summary>
-    public ReturnTemplateDto? Template { get; set; }
-
-    /// <summary>Ayın her günü için bir kayıt (1..ayın gün sayısı).</summary>
-    public List<ReturnDayDto> Days { get; set; } = new();
 }
 
 public class UpsertReturnDayDto

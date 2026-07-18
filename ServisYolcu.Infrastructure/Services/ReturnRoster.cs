@@ -75,6 +75,34 @@ internal static class ReturnRoster
                 template is not null));
         }
 
+        // ── Base rezervasyonlar (tek seferlik dönüş kaydı) ───────────────────────
+        // POST /api/Trips/reservations (createReservation) ile yapılan dönüş
+        // rezervasyonları Reservations tablosuna yazılır; yukarıdaki şablon + günlük
+        // karar kaynakları bu tabloyu OKUMAZ. Bu yüzden dönüşünü bu yolla rezerve eden
+        // yolcu ne sürücü manifestosunda ne de bildirim dağıtımında görünüyordu.
+        // Gidiş tarafı (TripService.BuildOutboundRosterAsync) base rezervasyonları zaten
+        // sayar; dönüşü de simetrik yapıyoruz. Dönüşte Reservation.BoardingStopId = İNİŞ
+        // durağıdır (yolcu iniş durağını seçer). Şablon/karar üzerinden zaten listelenen
+        // yolcuyu iki kez eklememek için hariç tutulur.
+        var seenPassengerIds = rows.Select(r => r.PassengerId).ToHashSet();
+
+        var reservations = await context.Reservations
+            .Include(r => r.Passenger)
+            .Where(r => r.TripId == tripId
+                        && r.Status != ReservationStatus.Cancelled
+                        && !seenPassengerIds.Contains(r.PassengerId))
+            .ToListAsync(cancellationToken);
+
+        foreach (var r in reservations)
+        {
+            rows.Add(new ReturnRosterRow(
+                r.PassengerId,
+                r.Passenger,
+                ReturnAttendanceState.Confirmed,
+                r.BoardingStopId,
+                false));
+        }
+
         return rows;
     }
 }

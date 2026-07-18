@@ -4,12 +4,6 @@ namespace ServisYolcu.Core.Interfaces;
 
 public interface IReturnPlanService
 {
-    /// <summary>
-    /// Bir ayın her günü için etkin dönüş durumunu (şablon + günlük kararlar) döner.
-    /// Dönüş sekmesi tek çağrıyla çizilebilsin diye şablon da birlikte gelir.
-    /// </summary>
-    Task<ReturnMonthDto> GetMonthAsync(int passengerId, int year, int month, CancellationToken cancellationToken = default);
-
     /// <summary>Bir gün için yazılmış günlük dönüş kararını döner; yoksa null.</summary>
     Task<ReturnDayDto?> GetDayAsync(int passengerId, DateOnly date, CancellationToken cancellationToken = default);
 

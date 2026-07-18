@@ -58,36 +58,4 @@ public class TokenService : ITokenService
         rng.GetBytes(randomBytes);
         return Convert.ToBase64String(randomBytes);
     }
-
-    public int? GetUserIdFromToken(string token)
-    {
-        var jwtSettings = _configuration.GetSection("JwtSettings");
-        var secretKey = jwtSettings["SecretKey"];
-        if (secretKey is null) return null;
-
-        var tokenHandler = new JwtSecurityTokenHandler();
-        var key = Encoding.UTF8.GetBytes(secretKey);
-
-        try
-        {
-            tokenHandler.ValidateToken(token, new TokenValidationParameters
-            {
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(key),
-                ValidateIssuer = true,
-                ValidIssuer = jwtSettings["Issuer"],
-                ValidateAudience = true,
-                ValidAudience = jwtSettings["Audience"],
-                ValidateLifetime = false
-            }, out var validatedToken);
-
-            var jwtToken = (JwtSecurityToken)validatedToken;
-            var userIdClaim = jwtToken.Claims.First(c => c.Type == ClaimTypes.NameIdentifier).Value;
-            return int.Parse(userIdClaim);
-        }
-        catch
-        {
-            return null;
-        }
-    }
 }

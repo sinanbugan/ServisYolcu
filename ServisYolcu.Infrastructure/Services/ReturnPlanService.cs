@@ -29,63 +29,6 @@ public class ReturnPlanService : IReturnPlanService
         _clock = clock;
     }
 
-    public async Task<ReturnMonthDto> GetMonthAsync(int passengerId, int year, int month, CancellationToken cancellationToken = default)
-    {
-        // ExceptionMiddleware yalnızca InvalidOperationException'ı 400'e çeviriyor.
-        if (month is < 1 or > 12)
-            throw new InvalidOperationException("Ay 1-12 aralığında olmalıdır.");
-        if (year is < 2000 or > 2100)
-            throw new InvalidOperationException("Yıl geçersiz.");
-
-        var template = await _context.MonthlyReservations
-            .Include(m => m.Trip).ThenInclude(t => t.Route)
-            .Include(m => m.BoardingStop)
-            .FirstOrDefaultAsync(
-                m => m.PassengerId == passengerId
-                     && m.Direction == TripDirection.Return
-                     && m.Year == year
-                     && m.Month == month,
-                cancellationToken);
-
-        var firstDay = new DateOnly(year, month, 1);
-        var lastDay = new DateOnly(year, month, DateTime.DaysInMonth(year, month));
-
-        var choices = await _context.ReturnDayChoices
-            .Include(c => c.Trip).ThenInclude(t => t!.Route)
-            .Include(c => c.BoardingStop)
-            .Where(c => c.PassengerId == passengerId && c.Date >= firstDay && c.Date <= lastDay)
-            .ToListAsync(cancellationToken);
-
-        var choiceByDate = choices.ToDictionary(c => c.Date);
-        var today = _clock.LocalToday;
-
-        var days = new List<ReturnDayDto>();
-        for (var date = firstDay; date <= lastDay; date = date.AddDays(1))
-        {
-            choiceByDate.TryGetValue(date, out var choice);
-            days.Add(BuildDayDto(date, choice, template, today));
-        }
-
-        return new ReturnMonthDto
-        {
-            Year = year,
-            Month = month,
-            Template = template is null ? null : new ReturnTemplateDto
-            {
-                Id = template.Id,
-                TripId = template.TripId,
-                RouteName = template.Trip.Route.Name,
-                StartPoint = template.Trip.Route.StartPoint,
-                EndPoint = template.Trip.Route.EndPoint,
-                DepartureTime = template.Trip.DepartureTime,
-                DaysOff = DayList.Parse(template.DaysOff),
-                BoardingStopId = template.BoardingStopId,
-                BoardingStopName = template.BoardingStop?.Name,
-            },
-            Days = days,
-        };
-    }
-
     public async Task<ReturnDayDto?> GetDayAsync(int passengerId, DateOnly date, CancellationToken cancellationToken = default)
     {
         var choice = await _context.ReturnDayChoices

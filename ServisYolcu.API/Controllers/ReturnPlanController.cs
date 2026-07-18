@@ -22,16 +22,6 @@ public class ReturnPlanController : ControllerBase
         _service = service;
     }
 
-    /// <summary>Bir ayın her günü için etkin dönüş durumu + o ayın şablonu.</summary>
-    [HttpGet("month")]
-    public async Task<ActionResult<ReturnMonthDto>> GetMonth(
-        [FromQuery] int year, [FromQuery] int month, CancellationToken cancellationToken)
-    {
-        var passengerId = CurrentPassengerId();
-        var result = await _service.GetMonthAsync(passengerId, year, month, cancellationToken);
-        return Ok(result);
-    }
-
     /// <summary>Bir gün için yazılmış günlük dönüş kararını döner; yoksa null.</summary>
     [HttpGet("days/{date}")]
     public async Task<ActionResult<ReturnDayDto?>> GetDay(DateOnly date, CancellationToken cancellationToken)

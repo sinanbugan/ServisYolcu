@@ -24,21 +24,7 @@ public class AppClock : IAppClock
         }
     }
 
-    public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
-
     public DateTimeOffset LocalNow => TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZone);
 
     public DateOnly LocalToday => DateOnly.FromDateTime(LocalNow.DateTime);
-
-    public DateOnly ToLocalDate(DateTime utc)
-    {
-        var asOffset = utc.Kind switch
-        {
-            DateTimeKind.Utc => new DateTimeOffset(utc, TimeSpan.Zero),
-            DateTimeKind.Local => new DateTimeOffset(utc),
-            _ => new DateTimeOffset(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeSpan.Zero),
-        };
-
-        return DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(asOffset, TimeZone).DateTime);
-    }
 }
