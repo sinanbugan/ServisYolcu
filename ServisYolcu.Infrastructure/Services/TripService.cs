@@ -29,13 +29,13 @@ public class TripService : ITripService
         if (direction.HasValue)
             query = query.Where(t => t.Direction == direction.Value);
 
-        // Gidiş seferlerinde yolcunun zaten aktif rezervasyonu olan sefer tekrar listelenmez.
-        // Dönüş seferlerinde Reservation kavramı yoktur (koltuk günlük kararla tutulur),
-        // bu yüzden o filtre uygulanmaz.
+        // Dönüş seferleri her zaman listelenir.
+        // Gidiş seferlerinde ise yolcunun aktif rezervasyonu varsa sefer listede kalır;
+        // rezervasyonu yoksa koltuk uygunluğu kontrol edilir.
         query = query.Where(t =>
             t.Direction == TripDirection.Return ||
-            (t.AvailableSeats > 0 &&
-             !t.Reservations.Any(r => r.PassengerId == passengerId && r.Status != ReservationStatus.Cancelled)));
+            t.Reservations.Any(r => r.PassengerId == passengerId && r.Status != ReservationStatus.Cancelled) ||
+            t.AvailableSeats > 0);
 
         // Önce entity'leri çek: MapToDto çevrilebilir bir ifade değil ve entity döndürmeyen
         // bir projeksiyonda Include'lar yok sayılabilir (Route/Driver null gelirdi).

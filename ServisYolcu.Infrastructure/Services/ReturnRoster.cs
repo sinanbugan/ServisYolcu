@@ -31,20 +31,29 @@ internal static class ReturnRoster
                         && m.Month == date.Month)
             .ToListAsync(cancellationToken);
 
-        var templatePassengerIds = templates.Select(m => m.PassengerId).ToList();
+        var reservations = await context.Reservations
+            .Include(r => r.Passenger)
+            .Where(r => r.TripId == tripId && r.Status == ReservationStatus.Confirmed)
+            .ToListAsync(cancellationToken);
+
+        var basePassengerIds = templates.Select(t => t.PassengerId)
+            .Concat(reservations.Select(r => r.PassengerId))
+            .Distinct()
+            .ToList();
 
         // İlgili TÜM kararlar gerekli: bu sefere geçenler (şablonu olmayan yolcular dâhil)
         // ve şablon yolcularının başka bir sefere kayması / o günü iptal etmesi.
         var choices = await context.ReturnDayChoices
             .Include(c => c.Passenger)
             .Where(c => c.Date == date
-                        && (c.TripId == tripId || templatePassengerIds.Contains(c.PassengerId)))
+                        && (c.TripId == tripId || basePassengerIds.Contains(c.PassengerId)))
             .ToListAsync(cancellationToken);
 
         var templateByPassenger = templates.ToDictionary(m => m.PassengerId);
+        var reservationByPassenger = reservations.ToDictionary(r => r.PassengerId);
         var choiceByPassenger = choices.ToDictionary(c => c.PassengerId);
 
-        var passengerIds = templatePassengerIds
+        var passengerIds = basePassengerIds
             .Concat(choices.Where(c => c.TripId == tripId).Select(c => c.PassengerId))
             .Distinct()
             .ToList();
@@ -54,53 +63,42 @@ internal static class ReturnRoster
         foreach (var passengerId in passengerIds)
         {
             templateByPassenger.TryGetValue(passengerId, out var template);
+            reservationByPassenger.TryGetValue(passengerId, out var reservation);
             choiceByPassenger.TryGetValue(passengerId, out var choice);
 
-            var resolution = ReturnAttendanceResolver.Resolve(date, choice, template);
+            // Gidişteki gibi temel kayıt varsa o yolcuyu önce bu kayıttan kur.
+            // Günlük dönüş kararı sadece yokluğu/gelmeyi değiştirsin; boarding stop'u ezmesin.
+            if (choice is not null
+                && choice.Decision == ReturnDecision.Coming
+                && choice.TripId != tripId)
+                continue;
 
-            // Yolcu bu manifestoya ancak çözümlenen sefer BU sefer ise "geliyor" olarak girer.
-            // Başka bir dönüş seferine kaydıysa burada "gelmiyor" görünür.
-            var onThisTrip = resolution.TripId == tripId && resolution.State != ReturnAttendanceState.NotComing;
-            var state = onThisTrip ? resolution.State : ReturnAttendanceState.NotComing;
+            var coming = reservation is not null;
+            if (template is not null)
+                coming = !DayList.Parse(template.DaysOff).Contains(date.Day);
 
-            // Gelmeyen şablon yolcusunu her zamanki durağında (üzeri çizili) göstermek
-            // sürücü için daha okunaklı.
-            var boardingStopId = onThisTrip ? resolution.BoardingStopId : template?.BoardingStopId;
+            var isOverrideForThisTrip = choice is not null
+                                        && choice.Decision == ReturnDecision.Coming
+                                        && choice.TripId == tripId;
+
+            if (choice is not null && choice.Decision == ReturnDecision.NotComing)
+                coming = false;
+            if (isOverrideForThisTrip)
+                coming = true;
+
+            var baseStopId = reservation?.BoardingStopId ?? template?.BoardingStopId;
+            var boardingStopId = isOverrideForThisTrip
+                ? choice!.BoardingStopId ?? baseStopId
+                : baseStopId;
+
+            var state = coming ? ReturnAttendanceState.Confirmed : ReturnAttendanceState.NotComing;
 
             rows.Add(new ReturnRosterRow(
                 passengerId,
-                choice?.Passenger ?? template?.Passenger,
+                reservation?.Passenger ?? choice?.Passenger ?? template?.Passenger,
                 state,
                 boardingStopId,
                 template is not null));
-        }
-
-        // ── Base rezervasyonlar (tek seferlik dönüş kaydı) ───────────────────────
-        // POST /api/Trips/reservations (createReservation) ile yapılan dönüş
-        // rezervasyonları Reservations tablosuna yazılır; yukarıdaki şablon + günlük
-        // karar kaynakları bu tabloyu OKUMAZ. Bu yüzden dönüşünü bu yolla rezerve eden
-        // yolcu ne sürücü manifestosunda ne de bildirim dağıtımında görünüyordu.
-        // Gidiş tarafı (TripService.BuildOutboundRosterAsync) base rezervasyonları zaten
-        // sayar; dönüşü de simetrik yapıyoruz. Dönüşte Reservation.BoardingStopId = İNİŞ
-        // durağıdır (yolcu iniş durağını seçer). Şablon/karar üzerinden zaten listelenen
-        // yolcuyu iki kez eklememek için hariç tutulur.
-        var seenPassengerIds = rows.Select(r => r.PassengerId).ToHashSet();
-
-        var reservations = await context.Reservations
-            .Include(r => r.Passenger)
-            .Where(r => r.TripId == tripId
-                        && r.Status != ReservationStatus.Cancelled
-                        && !seenPassengerIds.Contains(r.PassengerId))
-            .ToListAsync(cancellationToken);
-
-        foreach (var r in reservations)
-        {
-            rows.Add(new ReturnRosterRow(
-                r.PassengerId,
-                r.Passenger,
-                ReturnAttendanceState.Confirmed,
-                r.BoardingStopId,
-                false));
         }
 
         return rows;
